@@ -431,7 +431,7 @@ const getUser = effectOs
     // Tagged error class - use the class directly
     // The only difference is that the code is defined by the constant version of the tag
     // Or when defined explicitely like in the Forbidden tagged error above
-    UserNotFound, 
+    UserNotFound,
     INVALID_INPUT: InvalidInput,
     // Traditional format still works, and can be colocated
     INTERNAL_ERROR: { status: 500, message: 'Something went wrong' },

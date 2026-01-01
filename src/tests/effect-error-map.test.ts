@@ -96,8 +96,11 @@ describe("createEffectErrorConstructorMap", () => {
 
     const constructorMap = createEffectErrorConstructorMap(errorMap);
 
-    expect(constructorMap.USER_NOT_FOUND_ERROR).toBe(UserNotFoundError);
-    expect(constructorMap.FORBIDDEN).toBe(PermissionDenied);
+    const userNotFoundError = constructorMap.USER_NOT_FOUND_ERROR();
+    expect(userNotFoundError).toBeInstanceOf(UserNotFoundError);
+
+    const forbiddenError = constructorMap.FORBIDDEN();
+    expect(forbiddenError).toBeInstanceOf(PermissionDenied);
   });
 
   it("should create ORPCError factory for traditional items", () => {
@@ -135,7 +138,7 @@ describe("createEffectErrorConstructorMap", () => {
     expect(badRequestError.message).toBe("Invalid input");
 
     // Tagged error class is passed through
-    const userNotFoundError = new constructorMap.USER_NOT_FOUND_ERROR();
+    const userNotFoundError = constructorMap.USER_NOT_FOUND_ERROR();
     expect(isORPCTaggedError(userNotFoundError)).toBe(true);
     expect(userNotFoundError._tag).toBe("UserNotFoundError");
   });
@@ -253,7 +256,7 @@ describe("effectBuilder with EffectErrorMap", () => {
       // oxlint-disable-next-line require-yield
       .effect(function* ({ input, errors }) {
         if (input.id === "not-found") {
-          return yield* Effect.fail(new errors.USER_NOT_FOUND_ERROR());
+          return yield* Effect.fail(errors.USER_NOT_FOUND_ERROR());
         }
         return yield* Effect.succeed({ id: input.id, name: "Test User" });
       });

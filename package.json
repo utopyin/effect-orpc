@@ -12,6 +12,12 @@
     "type": "git",
     "url": "git+https://github.com/utopyin/effect-orpc.git"
   },
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md",
+    "src"
+  ],
   "type": "module",
   "exports": {
     ".": "./src/index.ts"

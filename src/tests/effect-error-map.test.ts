@@ -1,0 +1,313 @@
+import { fallbackORPCErrorMessage, ORPCError } from "@orpc/client";
+import { Effect, Layer, ManagedRuntime } from "effect";
+import { describe, expect, expectTypeOf, it } from "vitest";
+import { z } from "zod";
+
+import type {
+  EffectErrorMap,
+  EffectErrorMapToUnion,
+  ORPCTaggedErrorInstance,
+} from "../tagged-error";
+
+import { makeEffectORPC } from "../effect-builder";
+import {
+  createEffectErrorConstructorMap,
+  effectErrorMapToErrorMap,
+  isORPCTaggedError,
+  isORPCTaggedErrorClass,
+  ORPCTaggedError,
+} from "../tagged-error";
+
+// Define test tagged errors
+class UserNotFoundError extends ORPCTaggedError<UserNotFoundError>()(
+  "UserNotFoundError",
+) {}
+class ValidationError extends ORPCTaggedError<
+  ValidationError,
+  { fields: string[] }
+>()("ValidationError", "BAD_REQUEST", { message: "Validation failed" }) {}
+class PermissionDenied extends ORPCTaggedError<PermissionDenied>()(
+  "PermissionDenied",
+  "FORBIDDEN",
+) {}
+
+describe("effectErrorMap types", () => {
+  it("should accept both traditional and tagged error formats", () => {
+    const errorMap = {
+      // Traditional format
+      BAD_REQUEST: { status: 400, message: "Bad request" },
+      // Tagged error class references
+      USER_NOT_FOUND_ERROR: UserNotFoundError,
+      FORBIDDEN: PermissionDenied,
+    } satisfies EffectErrorMap;
+
+    expect(errorMap.BAD_REQUEST).toEqual({
+      status: 400,
+      message: "Bad request",
+    });
+    expect(errorMap.USER_NOT_FOUND_ERROR).toBe(UserNotFoundError);
+    expect(errorMap.FORBIDDEN).toBe(PermissionDenied);
+  });
+
+  it("should infer correct union type from EffectErrorMap", () => {
+    type TestErrorMap = {
+      BAD_REQUEST: { status?: number; message?: string };
+      USER_NOT_FOUND_ERROR: typeof UserNotFoundError;
+      FORBIDDEN: typeof PermissionDenied;
+    };
+
+    type ErrorUnion = EffectErrorMapToUnion<TestErrorMap>;
+
+    // The union should include ORPCError for traditional and tagged error instances for classes
+    expectTypeOf<ErrorUnion>().toMatchTypeOf<
+      | ORPCError<"BAD_REQUEST", unknown>
+      | ORPCTaggedErrorInstance<
+          "UserNotFoundError",
+          "USER_NOT_FOUND_ERROR",
+          undefined
+        >
+      | ORPCTaggedErrorInstance<"PermissionDenied", "FORBIDDEN", undefined>
+    >();
+  });
+});
+
+describe("isORPCTaggedErrorClass", () => {
+  it("should return true for tagged error classes", () => {
+    expect(isORPCTaggedErrorClass(UserNotFoundError)).toBe(true);
+    expect(isORPCTaggedErrorClass(ValidationError)).toBe(true);
+    expect(isORPCTaggedErrorClass(PermissionDenied)).toBe(true);
+  });
+
+  it("should return false for non-tagged error classes", () => {
+    expect(isORPCTaggedErrorClass(Error)).toBe(false);
+    expect(isORPCTaggedErrorClass({})).toBe(false);
+    expect(isORPCTaggedErrorClass(null)).toBe(false);
+    expect(isORPCTaggedErrorClass(undefined)).toBe(false);
+    expect(isORPCTaggedErrorClass(() => {})).toBe(false);
+  });
+});
+
+describe("createEffectErrorConstructorMap", () => {
+  it("should pass through tagged error classes", () => {
+    const errorMap = {
+      USER_NOT_FOUND_ERROR: UserNotFoundError,
+      FORBIDDEN: PermissionDenied,
+    } satisfies EffectErrorMap;
+
+    const constructorMap = createEffectErrorConstructorMap(errorMap);
+
+    expect(constructorMap.USER_NOT_FOUND_ERROR).toBe(UserNotFoundError);
+    expect(constructorMap.FORBIDDEN).toBe(PermissionDenied);
+  });
+
+  it("should create ORPCError factory for traditional items", () => {
+    const errorMap = {
+      BAD_REQUEST: { status: 400, message: "Bad request" },
+      NOT_FOUND: { message: "Not found" },
+    } satisfies EffectErrorMap;
+
+    const constructorMap = createEffectErrorConstructorMap(errorMap);
+
+    const badRequestError = constructorMap.BAD_REQUEST();
+    expect(badRequestError).toBeInstanceOf(ORPCError);
+    expect(badRequestError.code).toBe("BAD_REQUEST");
+    expect(badRequestError.status).toBe(400);
+    expect(badRequestError.message).toBe("Bad request");
+
+    const notFoundError = constructorMap.NOT_FOUND();
+    expect(notFoundError).toBeInstanceOf(ORPCError);
+    expect(notFoundError.code).toBe("NOT_FOUND");
+  });
+
+  it("should work with mixed error map", () => {
+    const errorMap = {
+      BAD_REQUEST: { status: 400 },
+      USER_NOT_FOUND_ERROR: UserNotFoundError,
+    } satisfies EffectErrorMap;
+
+    const constructorMap = createEffectErrorConstructorMap(errorMap);
+
+    // Traditional error returns ORPCError
+    const badRequestError = constructorMap.BAD_REQUEST({
+      message: "Invalid input",
+    });
+    expect(badRequestError).toBeInstanceOf(ORPCError);
+    expect(badRequestError.message).toBe("Invalid input");
+
+    // Tagged error class is passed through
+    const userNotFoundError = new constructorMap.USER_NOT_FOUND_ERROR();
+    expect(isORPCTaggedError(userNotFoundError)).toBe(true);
+    expect(userNotFoundError._tag).toBe("UserNotFoundError");
+  });
+});
+
+describe("effectErrorMapToErrorMap", () => {
+  it("should convert EffectErrorMap to standard ErrorMap", () => {
+    const effectErrorMap = {
+      BAD_REQUEST: { status: 400, message: "Bad request" },
+      USER_NOT_FOUND_ERROR: UserNotFoundError,
+      FORBIDDEN: PermissionDenied,
+    } satisfies EffectErrorMap;
+
+    const errorMap = effectErrorMapToErrorMap(effectErrorMap);
+
+    expect(errorMap.BAD_REQUEST).toEqual({
+      status: 400,
+      message: "Bad request",
+    });
+    expect(errorMap.USER_NOT_FOUND_ERROR).toEqual({
+      data: undefined,
+      message: "USER_NOT_FOUND_ERROR",
+      status: 500,
+    });
+    expect(errorMap.FORBIDDEN).toEqual({
+      data: undefined,
+      message: fallbackORPCErrorMessage("FORBIDDEN", undefined),
+      status: 403,
+    });
+  });
+});
+
+describe("effectBuilder with EffectErrorMap", () => {
+  const runtime = ManagedRuntime.make(Layer.empty);
+  const effectOs = makeEffectORPC(runtime);
+
+  it("should support errors() with traditional format", () => {
+    const builder = effectOs.errors({
+      BAD_REQUEST: { status: 400, message: "Bad request" },
+    });
+
+    expect(builder["~orpc"].effectErrorMap).toEqual({
+      BAD_REQUEST: { status: 400, message: "Bad request" },
+    });
+  });
+
+  it("should support errors() with tagged error classes", () => {
+    const builder = effectOs.errors({
+      USER_NOT_FOUND_ERROR: UserNotFoundError,
+      FORBIDDEN: PermissionDenied,
+    });
+
+    expect(builder["~orpc"].effectErrorMap.USER_NOT_FOUND_ERROR).toBe(
+      UserNotFoundError,
+    );
+    expect(builder["~orpc"].effectErrorMap.FORBIDDEN).toBe(PermissionDenied);
+  });
+
+  it("should support mixed error format", () => {
+    const builder = effectOs.errors({
+      BAD_REQUEST: { status: 400 },
+      USER_NOT_FOUND_ERROR: UserNotFoundError,
+    });
+
+    expect(builder["~orpc"].effectErrorMap.BAD_REQUEST).toEqual({
+      status: 400,
+    });
+    expect(builder["~orpc"].effectErrorMap.USER_NOT_FOUND_ERROR).toBe(
+      UserNotFoundError,
+    );
+  });
+
+  it("should merge errors correctly", () => {
+    const builder = effectOs
+      .errors({ BAD_REQUEST: { status: 400 } })
+      .errors({ USER_NOT_FOUND_ERROR: UserNotFoundError })
+      .errors({ FORBIDDEN: PermissionDenied });
+
+    expect(builder["~orpc"].effectErrorMap).toEqual({
+      BAD_REQUEST: { status: 400 },
+      USER_NOT_FOUND_ERROR: UserNotFoundError,
+      FORBIDDEN: PermissionDenied,
+    });
+  });
+
+  it("should create procedure with effect handler", async () => {
+    const procedure = effectOs
+      .errors({
+        USER_NOT_FOUND_ERROR: UserNotFoundError,
+        BAD_REQUEST: { status: 400 },
+      })
+      .input(z.object({ id: z.string() }))
+      .effect(({ input, errors }) => {
+        // errors.USER_NOT_FOUND_ERROR is the class
+        expect(errors.USER_NOT_FOUND_ERROR).toBe(UserNotFoundError);
+
+        // errors.BAD_REQUEST is a factory function
+        expect(typeof errors.BAD_REQUEST).toBe("function");
+
+        return Effect.succeed({ id: input.id, name: "Test User" });
+      });
+
+    expect(procedure["~orpc"].effectErrorMap.USER_NOT_FOUND_ERROR).toBe(
+      UserNotFoundError,
+    );
+  });
+
+  it("should allow throwing tagged errors in effect handler", async () => {
+    const procedure = effectOs
+      .errors({
+        USER_NOT_FOUND_ERROR: UserNotFoundError,
+      })
+      .input(z.object({ id: z.string() }))
+      .effect(({ input, errors }) => {
+        if (input.id === "not-found") {
+          return Effect.fail(new errors.USER_NOT_FOUND_ERROR());
+        }
+        return Effect.succeed({ id: input.id, name: "Test User" });
+      });
+
+    // Test successful case
+    const successResult = await procedure["~orpc"].handler({
+      context: {},
+      input: { id: "123" },
+      path: ["test"],
+      procedure: {} as any,
+      signal: undefined,
+      lastEventId: undefined,
+      errors: {} as any,
+    });
+    expect(successResult).toEqual({ id: "123", name: "Test User" });
+
+    // Test error case
+    await expect(
+      procedure["~orpc"].handler({
+        context: {},
+        input: { id: "not-found" },
+        path: ["test"],
+        procedure: {} as any,
+        signal: undefined,
+        lastEventId: undefined,
+        errors: {} as any,
+      }),
+    ).rejects.toThrow();
+  });
+});
+
+describe("effectDecoratedProcedure.errors()", () => {
+  const runtime = ManagedRuntime.make(Layer.empty);
+  const effectOs = makeEffectORPC(runtime);
+
+  it("should support adding errors to procedure", () => {
+    const procedure = effectOs
+      .input(z.object({ id: z.string() }))
+      .effect(({ input }) => Effect.succeed({ id: input.id }))
+      .errors({ USER_NOT_FOUND_ERROR: UserNotFoundError });
+
+    expect(procedure["~orpc"].effectErrorMap.USER_NOT_FOUND_ERROR).toBe(
+      UserNotFoundError,
+    );
+  });
+
+  it("should merge errors on procedure", () => {
+    const procedure = effectOs
+      .errors({ BAD_REQUEST: { status: 400 } })
+      .input(z.object({ id: z.string() }))
+      .effect(({ input }) => Effect.succeed({ id: input.id }))
+      .errors({ USER_NOT_FOUND_ERROR: UserNotFoundError });
+
+    expect(procedure["~orpc"].effectErrorMap).toEqual({
+      BAD_REQUEST: { status: 400 },
+      USER_NOT_FOUND_ERROR: UserNotFoundError,
+    });
+  });
+});

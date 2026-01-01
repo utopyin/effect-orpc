@@ -38,8 +38,6 @@ jobs:
       - name: Build
         run: bun run build
 
-      - name: Publish to npm
+      - name: Publish to NPM
         if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
-        run: |
-          echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}" > .npmrc
-          npm publish --access public
+        run: bun publish

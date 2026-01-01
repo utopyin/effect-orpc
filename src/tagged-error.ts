@@ -80,12 +80,14 @@ export type InferORPCError<T> =
 
 /**
  * Any ORPCTaggedErrorClass
+ * Uses `...args: any[]` for the constructor to accept any tagged error class,
+ * regardless of whether TData requires options to be provided.
  */
-export type AnyORPCTaggedErrorClass = ORPCTaggedErrorClass<
-  string,
-  ORPCErrorCode,
-  any
->;
+export type AnyORPCTaggedErrorClass = {
+  readonly _tag: string;
+  readonly code: ORPCErrorCode;
+  new (...args: any[]): ORPCTaggedErrorInstance<string, ORPCErrorCode, any>;
+};
 
 /**
  * Check if a value is an ORPCTaggedErrorClass (constructor)
@@ -411,7 +413,9 @@ export type EffectErrorConstructorMapItem<
   T extends EffectErrorMapItem,
 > =
   T extends ORPCTaggedErrorClass<infer _TTag, TCode, infer TData>
-    ? ORPCTaggedErrorClass<_TTag, TCode, TData>
+    ? (
+        ...args: MaybeOptionalOptions<ORPCTaggedErrorOptions<TData>>
+      ) => ORPCTaggedErrorInstance<_TTag, TCode, TData>
     : T extends { data?: infer TData }
       ? (
           ...args: MaybeOptionalOptions<

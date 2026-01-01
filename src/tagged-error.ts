@@ -452,9 +452,11 @@ export function createEffectErrorConstructorMap<T extends EffectErrorMap>(
 
       const config = target[code];
 
-      // If it's a tagged error class, return it directly
+      // If it's a tagged error class, create a class constructor function
       if (isORPCTaggedErrorClass(config)) {
-        return config;
+        return (
+          ...opts: MaybeOptionalOptions<ORPCTaggedErrorOptions<unknown>>
+        ) => new config(...opts);
       }
 
       // Otherwise, create a factory function for ORPCError

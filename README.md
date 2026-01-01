@@ -114,78 +114,15 @@ const effectOs = makeEffectORPC(runtime)
 
 // ✅ This compiles - ProvidedService is in the runtime
 const works = effectOs.effect(function* () {
-  const svc = yield* ProvidedService
-  return yield* svc.doSomething()
+  const service = yield* ProvidedService
+  return yield* service.doSomething()
 })
 
 // ❌ This fails to compile - MissingService is not in the runtime
 const fails = effectOs.effect(function* () {
-  const svc = yield* MissingService // Type error!
-  return yield* svc.doSomething()
+  const service = yield* MissingService // Type error!
+  return yield* service.doSomething()
 })
-```
-
-## Using Services
-
-```ts
-import { makeEffectORPC } from 'effect-orpc'
-import { Context, Effect, Layer, ManagedRuntime } from 'effect'
-import { z } from 'zod'
-
-// Define services
-class DatabaseService extends Context.Tag('DatabaseService')<
-  DatabaseService,
-  {
-    query: <T>(sql: string) => Effect.Effect<T[]>
-    execute: (sql: string) => Effect.Effect<void>
-  }
->() {}
-
-class CacheService extends Context.Tag('CacheService')<
-  CacheService,
-  {
-    get: <T>(key: string) => Effect.Effect<T | undefined>
-    set: <T>(key: string, value: T, ttl?: number) => Effect.Effect<void>
-  }
->() {}
-
-// Create layers
-const DatabaseServiceLive = Layer.succeed(DatabaseService, {
-  query: sql => Effect.succeed([]),
-  execute: sql => Effect.succeed(undefined),
-})
-
-const CacheServiceLive = Layer.succeed(CacheService, {
-  get: key => Effect.succeed(undefined),
-  set: (key, value, ttl) => Effect.succeed(undefined),
-})
-
-// Compose layers
-const AppLive = Layer.mergeAll(DatabaseServiceLive, CacheServiceLive)
-
-// Create runtime with all services
-const runtime = ManagedRuntime.make(AppLive)
-const effectOs = makeEffectORPC(runtime)
-
-// Use multiple services in a procedure
-const getUserWithCache = effectOs
-  .input(z.object({ id: z.string() }))
-  .effect(function* ({ input }) {
-    const cache = yield* CacheService
-    const db = yield* DatabaseService
-
-    // Try cache first
-    const cached = yield* cache.get<User>(`user:${input.id}`)
-    if (cached)
-      return cached
-
-    // Fall back to database
-    const [user] = yield* db.query<User>(`SELECT * FROM users WHERE id = '${input.id}'`)
-    if (user) {
-      yield* cache.set(`user:${input.id}`, user, 3600)
-    }
-    return user
-  })
 ```
 
 ## Wrapping a Customized Builder
@@ -264,7 +201,7 @@ const createPost = effectOs
     const user = yield* userService.findById(input.authorId)
 
     if (!user) {
-      throw errors.NOT_FOUND()
+      return yield Effect.Fail(errors.NOT_FOUND())
     }
 
     const postService = yield* PostService
@@ -339,7 +276,7 @@ const getUser = effectOs
 
     if (!user) {
       // Use oRPC's type-safe errors
-      throw errors.NOT_FOUND({ id: input.id })
+      yield* Effect.fail(errors.NOT_FOUND({ id: input.id }))
     }
 
     return user
@@ -350,7 +287,7 @@ const getUser = effectOs
 
 `ORPCTaggedError` lets you create Effect-native error classes that integrate seamlessly with oRPC. These errors:
 
-- Can be yielded in Effect generators (`yield* new MyError()`)
+- Can be yielded in Effect generators (`yield* new MyError()` or `yield* Effect.fail(errors.MyError)`)
 - Have all ORPCError properties (code, status, data, defined)
 - Can be used in `.errors()` maps for type-safe error handling
 - Automatically convert to ORPCError when thrown

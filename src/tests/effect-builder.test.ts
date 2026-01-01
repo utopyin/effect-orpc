@@ -122,7 +122,10 @@ describe("effectBuilder", () => {
   });
 
   it(".effect", () => {
-    const effectFn = vi.fn(() => Effect.succeed({ result: "test" }));
+    // oxlint-disable-next-line require-yield
+    const effectFn = vi.fn(function* () {
+      return { result: "test" };
+    });
     const applied = builder.effect(effectFn);
 
     expect(applied).instanceOf(EffectDecoratedProcedure);
@@ -131,9 +134,10 @@ describe("effectBuilder", () => {
   });
 
   it(".effect runs effect with runtime", async () => {
-    const effectFn = vi.fn(({ input }: { input: any }) =>
-      Effect.succeed({ output: `processed-${input}` }),
-    );
+    // oxlint-disable-next-line require-yield
+    const effectFn = vi.fn(function* ({ input }: { input: any }) {
+      return { output: `processed-${input}` };
+    });
 
     const applied = builder.effect(effectFn);
 
@@ -175,7 +179,10 @@ describe("makeEffectORPC factory", () => {
   it("creates working procedure with default os", async () => {
     const effectBuilder = makeEffectORPC(runtime);
 
-    const procedure = effectBuilder.effect(() => Effect.succeed("hello"));
+    // oxlint-disable-next-line require-yield
+    const procedure = effectBuilder.effect(function* () {
+      return "hello";
+    });
 
     const result = await procedure["~orpc"].handler({
       context: {},
@@ -193,13 +200,12 @@ describe("makeEffectORPC factory", () => {
   it("supports Effect.fn generator syntax", async () => {
     const effectBuilder = makeEffectORPC(runtime);
 
-    const procedure = effectBuilder.effect(
-      Effect.fn(function* () {
-        const a = yield* Effect.succeed(1);
-        const b = yield* Effect.succeed(2);
-        return a + b;
-      }),
-    );
+    // oxlint-disable-next-line require-yield
+    const procedure = effectBuilder.effect(function* () {
+      const a = yield* Effect.succeed(1);
+      const b = yield* Effect.succeed(2);
+      return a + b;
+    });
 
     const result = await procedure["~orpc"].handler({
       context: {},
@@ -223,7 +229,10 @@ describe("makeEffectORPC factory", () => {
       .route({ path: "/test" })
       .input(z.object({ id: z.string() }))
       .output(z.object({ name: z.string() }))
-      .effect(() => Effect.succeed({ name: "test" }));
+      // oxlint-disable-next-line require-yield
+      .effect(function* () {
+        return { name: "test" };
+      });
 
     expect(procedure).instanceOf(EffectDecoratedProcedure);
     expect(procedure["~orpc"].errorMap).toHaveProperty("NOT_FOUND");
@@ -262,12 +271,13 @@ describe("effect with services", () => {
     const serviceRuntime = ManagedRuntime.make(CounterLive);
     const effectBuilder = makeEffectORPC(serviceRuntime);
 
-    const procedure = effectBuilder.input(z.number()).effect(
-      Effect.fn(function* ({ input }) {
-        const counter = yield* Counter;
-        return yield* counter.increment(input as number);
-      }),
-    );
+    // oxlint-disable-next-line require-yield
+    const procedure = effectBuilder.input(z.number()).effect(function* ({
+      input,
+    }) {
+      const counter = yield* Counter;
+      return yield* counter.increment(input as number);
+    });
 
     const result = await procedure["~orpc"].handler({
       context: {},
@@ -307,7 +317,10 @@ describe(".traced", () => {
     const procedure = effectBuilder
       .input(z.object({ id: z.string() }))
       .traced("users.getUser")
-      .effect(() => Effect.succeed({ name: "test" }));
+      // oxlint-disable-next-line require-yield
+      .effect(function* () {
+        return { name: "test" };
+      });
 
     expect(procedure).instanceOf(EffectDecoratedProcedure);
     // The span wrapping happens in the handler, so we just verify the procedure was created
@@ -319,7 +332,10 @@ describe(".traced", () => {
     const procedure = effectBuilder
       .input(z.object({ id: z.string() }))
       .traced("users.getUser")
-      .effect(({ input }) => Effect.succeed({ id: input.id, name: "Alice" }));
+      // oxlint-disable-next-line require-yield
+      .effect(function* ({ input }) {
+        return { id: input.id, name: "Alice" };
+      });
 
     const result = await procedure["~orpc"].handler({
       context: {},
@@ -337,13 +353,11 @@ describe(".traced", () => {
   it("traced procedure with Effect.fn generator syntax", async () => {
     const effectBuilder = makeEffectORPC(runtime);
 
-    const procedure = effectBuilder.traced("math.add").effect(
-      Effect.fn(function* () {
-        const a = yield* Effect.succeed(10);
-        const b = yield* Effect.succeed(20);
-        return a + b;
-      }),
-    );
+    const procedure = effectBuilder.traced("math.add").effect(function* () {
+      const a = yield* Effect.succeed(10);
+      const b = yield* Effect.succeed(20);
+      return a + b;
+    });
 
     const result = await procedure["~orpc"].handler({
       context: {},
@@ -380,7 +394,10 @@ describe("default tracing (without .traced())", () => {
     // No .traced() call - should still work and use path as span name
     const procedure = effectBuilder
       .input(z.object({ id: z.string() }))
-      .effect(({ input }) => Effect.succeed({ id: input.id, name: "Bob" }));
+      // oxlint-disable-next-line require-yield
+      .effect(function* ({ input }) {
+        return { id: input.id, name: "Bob" };
+      });
 
     const result = await procedure["~orpc"].handler({
       context: {},
@@ -399,7 +416,10 @@ describe("default tracing (without .traced())", () => {
     const effectBuilder = makeEffectORPC(runtime);
 
     // Without .traced(), the span name should be derived from path
-    const procedure = effectBuilder.effect(() => Effect.succeed("hello"));
+    // oxlint-disable-next-line require-yield
+    const procedure = effectBuilder.effect(function* () {
+      return "hello";
+    });
 
     // The procedure should work with any path
     const result = await procedure["~orpc"].handler({
@@ -419,11 +439,12 @@ describe("default tracing (without .traced())", () => {
     const effectBuilder = makeEffectORPC(runtime);
 
     const procedure = effectBuilder.effect(
-      Effect.fn(function* () {
-        const x = yield* Effect.succeed(5);
-        const y = yield* Effect.succeed(10);
+      // oxlint-disable-next-line require-yield
+      function* () {
+        const x = 5;
+        const y = 10;
         return x * y;
-      }),
+      },
     );
 
     const result = await procedure["~orpc"].handler({
@@ -454,12 +475,9 @@ describe("default tracing (without .traced())", () => {
 
     const procedure = effectBuilder
       .input(z.object({ name: z.string() }))
-      .effect(
-        Effect.fn(function* ({ input }) {
-          const greeter = yield* Greeter;
-          return yield* greeter.greet(input.name);
-        }),
-      );
+      .effect(function* ({ input }) {
+        return yield* Greeter.greet(input.name);
+      });
 
     const result = await procedure["~orpc"].handler({
       context: {},

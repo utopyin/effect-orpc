@@ -20,6 +20,7 @@ import type {
 } from "@orpc/server";
 import type { IntersectPick } from "@orpc/shared";
 import type { ManagedRuntime } from "effect";
+import type { YieldWrap } from "effect/Utils";
 
 import {
   mergeErrorMap,
@@ -130,10 +131,17 @@ export type EffectProcedureHandler<
     TEffectErrorMap,
     TMeta
   >,
-) => Effect.Effect<
+) => Generator<
+  YieldWrap<
+    Effect.Effect<
+      any,
+      | EffectErrorMapToUnion<TEffectErrorMap>
+      | ORPCError<ORPCErrorCode, unknown>,
+      TRequirementsProvided
+    >
+  >,
   THandlerOutput,
-  EffectErrorMapToUnion<TEffectErrorMap> | ORPCError<ORPCErrorCode, unknown>,
-  TRequirementsProvided
+  never
 >;
 
 /**
@@ -477,11 +485,11 @@ export class EffectBuilder<
           lastEventId: opts.lastEventId,
           errors: createEffectErrorConstructorMap(this["~orpc"].effectErrorMap),
         };
-        const baseEffect = effectFn(effectOpts);
         const spanName = spanConfig?.name ?? opts.path.join(".");
         const captureStackTrace =
           spanConfig?.captureStackTrace ?? defaultCaptureStackTrace;
-        const tracedEffect = Effect.withSpan(baseEffect, spanName, {
+        const resolver = Effect.fnUntraced(effectFn);
+        const tracedEffect = Effect.withSpan(resolver(effectOpts), spanName, {
           captureStackTrace,
         });
         const exit = await runtime.runPromiseExit(tracedEffect, {

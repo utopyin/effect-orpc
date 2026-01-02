@@ -3,10 +3,15 @@ import type {
   ORPCErrorJSON,
   ORPCErrorOptions,
 } from "@orpc/client";
-import type { AnySchema, ErrorMap, ErrorMapItem } from "@orpc/contract";
-import type { ORPCErrorConstructorMapItemOptions } from "@orpc/server";
+import type {
+  AnySchema,
+  ErrorMap,
+  ErrorMapItem,
+  InferSchemaOutput,
+} from "@orpc/contract";
+import type { ORPCErrorConstructorMap } from "@orpc/server";
 import type { MaybeOptionalOptions } from "@orpc/shared";
-import type { Pipeable, Types } from "effect";
+import type { Pipeable } from "effect";
 import type * as Cause from "effect/Cause";
 import type * as Effect from "effect/Effect";
 
@@ -18,6 +23,8 @@ import {
 } from "@orpc/client";
 import { resolveMaybeOptionalOptions } from "@orpc/shared";
 import * as Data from "effect/Data";
+
+import type { EffectErrorMapToErrorMap } from "./types";
 
 /**
  * Symbol to access the underlying ORPCError instance
@@ -32,19 +39,19 @@ export const ORPCErrorSymbol: unique symbol = Symbol.for(
 export interface ORPCTaggedErrorInstance<
   TTag extends string,
   TCode extends ORPCErrorCode,
-  TData,
+  TSchema extends AnySchema = AnySchema,
 >
   extends Cause.YieldableError, Pipeable.Pipeable {
   readonly _tag: TTag;
   readonly code: TCode;
   readonly status: number;
-  readonly data: TData;
+  readonly schema: TSchema;
+  readonly data: InferSchemaOutput<TSchema>;
   readonly defined: boolean;
-  readonly [ORPCErrorSymbol]: ORPCError<TCode, TData>;
+  readonly [ORPCErrorSymbol]: ORPCError<TCode, InferSchemaOutput<TSchema>>;
 
-  toJSON(): ORPCErrorJSON<TCode, TData> & { _tag: TTag };
-  toORPCError(): ORPCError<TCode, TData>;
-  commit(): Effect.Effect<never, this, never>;
+  toJSON(): ORPCErrorJSON<TCode, InferSchemaOutput<TSchema>> & { _tag: TTag };
+  toORPCError(): ORPCError<TCode, InferSchemaOutput<TSchema>>;
 }
 
 /**
@@ -61,21 +68,23 @@ export type ORPCTaggedErrorOptions<TData> = Omit<
 export interface ORPCTaggedErrorClass<
   TTag extends string,
   TCode extends ORPCErrorCode,
-  TData,
+  TSchema extends AnySchema = AnySchema,
 > {
   readonly _tag: TTag;
   readonly code: TCode;
   new (
-    ...args: MaybeOptionalOptions<ORPCTaggedErrorOptions<TData>>
-  ): ORPCTaggedErrorInstance<TTag, TCode, TData>;
+    ...args: MaybeOptionalOptions<
+      ORPCTaggedErrorOptions<InferSchemaOutput<TSchema>>
+    >
+  ): ORPCTaggedErrorInstance<TTag, TCode, TSchema>;
 }
 
 /**
  * Type helper to infer the ORPCError type from an ORPCTaggedError
  */
 export type InferORPCError<T> =
-  T extends ORPCTaggedErrorInstance<string, infer TCode, infer TData>
-    ? ORPCError<TCode, TData>
+  T extends ORPCTaggedErrorInstance<string, infer TCode, infer TSchema>
+    ? ORPCError<TCode, InferSchemaOutput<TSchema>>
     : never;
 
 /**
@@ -86,7 +95,9 @@ export type InferORPCError<T> =
 export type AnyORPCTaggedErrorClass = {
   readonly _tag: string;
   readonly code: ORPCErrorCode;
-  new (...args: any[]): ORPCTaggedErrorInstance<string, ORPCErrorCode, any>;
+  new (
+    ...args: any[]
+  ): ORPCTaggedErrorInstance<string, ORPCErrorCode, AnySchema>;
 };
 
 /**
@@ -109,7 +120,7 @@ export function isORPCTaggedErrorClass(
  */
 export function isORPCTaggedError(
   value: unknown,
-): value is ORPCTaggedErrorInstance<string, ORPCErrorCode, unknown> {
+): value is ORPCTaggedErrorInstance<string, ORPCErrorCode, AnySchema> {
   return (
     typeof value === "object" && value !== null && ORPCErrorSymbol in value
   );
@@ -125,25 +136,74 @@ function toConstantCase(str: string): string {
     .replace(/([A-Z])([A-Z][a-z])/g, "$1_$2")
     .toUpperCase();
 }
+/**
+ * Checks if a character is an uppercase letter (A-Z)
+ */
+type IsUpperLetter<C extends string> =
+  C extends Uppercase<C>
+    ? C extends Lowercase<C>
+      ? false // Not a letter (number, special char)
+      : true
+    : false;
 
-// Type-level conversion: split on capital letters and join with underscore
-type SplitOnCapital<
+/**
+ * Checks if a character is a lowercase letter (a-z)
+ */
+type IsLowerLetter<C extends string> =
+  C extends Lowercase<C>
+    ? C extends Uppercase<C>
+      ? false // Not a letter (number, special char)
+      : true
+    : false;
+
+/**
+ * Converts PascalCase or camelCase to CONSTANT_CASE.
+ * Handles consecutive uppercase letters correctly.
+ *
+ * @example
+ * type T1 = ToConstantCase<"ABCCode">; // "ABC_CODE"
+ * type T2 = ToConstantCase<"UserCode">; // "USER_CODE"
+ * type T3 = ToConstantCase<"XMLHttpRequest">; // "XML_HTTP_REQUEST"
+ */
+type ToConstantCase<
   S extends string,
   Acc extends string = "",
+  PrevChar extends string = "",
+  InUpperSequence extends boolean = false,
 > = S extends `${infer Head}${infer Tail}`
-  ? Head extends Uppercase<Head>
-    ? Head extends Lowercase<Head>
-      ? SplitOnCapital<Tail, `${Acc}${Head}`>
-      : Acc extends ""
-        ? SplitOnCapital<Tail, Head>
-        : `${Acc}_${SplitOnCapital<Tail, Head>}`
-    : SplitOnCapital<Tail, `${Acc}${Uppercase<Head>}`>
+  ? IsUpperLetter<Head> extends true
+    ? Acc extends ""
+      ? // First character - no underscore
+        ToConstantCase<Tail, Head, Head, false>
+      : PrevChar extends ""
+        ? // Shouldn't happen, but handle gracefully
+          ToConstantCase<Tail, Head, Head, false>
+        : IsUpperLetter<PrevChar> extends true
+          ? // We're in an uppercase sequence
+            Tail extends `${infer Next}${infer _}`
+            ? IsLowerLetter<Next> extends true
+              ? // Next char is lowercase, so Head starts a new word - insert underscore
+                ToConstantCase<Tail, `${Acc}_${Head}`, Head, false>
+              : // Next char is uppercase or non-letter - continue sequence
+                ToConstantCase<Tail, `${Acc}${Head}`, Head, true>
+            : // Tail is empty - just append
+              ToConstantCase<Tail, `${Acc}${Head}`, Head, true>
+          : // Transition from lowercase to uppercase - insert underscore
+            ToConstantCase<Tail, `${Acc}_${Head}`, Head, false>
+    : IsLowerLetter<Head> extends true
+      ? InUpperSequence extends true
+        ? // End of uppercase sequence (2+) - insert underscore before lowercase
+          ToConstantCase<Tail, `${Acc}_${Uppercase<Head>}`, Head, false>
+        : // Single uppercase or no uppercase - no underscore
+          ToConstantCase<Tail, `${Acc}${Uppercase<Head>}`, Head, false>
+      : // Non-letter character - reset sequence
+        ToConstantCase<Tail, `${Acc}${Head}`, Head, false>
   : Acc;
 
 /**
  * Converts a tag name to an error code in CONSTANT_CASE.
  */
-export type TagToCode<TTag extends string> = SplitOnCapital<TTag>;
+export type TagToCode<TTag extends string> = ToConstantCase<TTag>;
 
 /**
  * Creates a tagged error class that combines Effect's YieldableError with ORPCError.
@@ -191,41 +251,34 @@ export type TagToCode<TTag extends string> = SplitOnCapital<TTag>;
 /**
  * Return type for the factory function with overloads
  */
-interface ORPCTaggedErrorFactory<Self, TData> {
+interface ORPCTaggedErrorFactory<TSchema extends AnySchema = AnySchema> {
   // Overload 1: tag only (code defaults to CONSTANT_CASE of tag)
   <TTag extends string>(
     tag: TTag,
-  ): Types.Equals<Self, unknown> extends true
-    ? `Missing \`Self\` generic - use \`class MyError extends ORPCTaggedError<MyError>()(tag) {}\``
-    : ORPCTaggedErrorClass<TTag, TagToCode<TTag>, TData>;
+  ): ORPCTaggedErrorClass<TTag, TagToCode<TTag>, TSchema>;
 
   // Overload 2: tag + options (code defaults to CONSTANT_CASE of tag)
   <TTag extends string>(
     tag: TTag,
     options: { status?: number; message?: string },
-  ): Types.Equals<Self, unknown> extends true
-    ? `Missing \`Self\` generic - use \`class MyError extends ORPCTaggedError<MyError>()(tag, options) {}\``
-    : ORPCTaggedErrorClass<TTag, TagToCode<TTag>, TData>;
+  ): ORPCTaggedErrorClass<TTag, TagToCode<TTag>, TSchema>;
 
   // Overload 3: tag + explicit code
   <TTag extends string, TCode extends ORPCErrorCode>(
     tag: TTag,
     code: TCode,
     defaultOptions?: { status?: number; message?: string },
-  ): Types.Equals<Self, unknown> extends true
-    ? `Missing \`Self\` generic - use \`class MyError extends ORPCTaggedError<MyError>()(tag, code) {}\``
-    : ORPCTaggedErrorClass<TTag, TCode, TData>;
+  ): ORPCTaggedErrorClass<TTag, TCode, TSchema>;
 }
 
-export function ORPCTaggedError<
-  Self,
-  TData = undefined,
->(): ORPCTaggedErrorFactory<Self, TData> {
+export function ORPCTaggedError<TSchema extends AnySchema = AnySchema>(
+  schema?: TSchema,
+) {
   const factory = <TTag extends string, TCode extends ORPCErrorCode>(
     tag: TTag,
     codeOrOptions?: TCode | { status?: number; message?: string },
     defaultOptions?: { status?: number; message?: string },
-  ): ORPCTaggedErrorClass<TTag, TCode, TData> => {
+  ): ORPCTaggedErrorClass<TTag, TCode, TSchema> => {
     // Determine if second arg is code or options
     const isCodeProvided = typeof codeOrOptions === "string";
     const code = (
@@ -237,30 +290,33 @@ export function ORPCTaggedError<
     const defaultMessage = options?.message;
 
     // Use Effect's TaggedError as the base - this handles all Effect internals
-    // (YieldableError, type symbols, commit(), Symbol.iterator, pipe(), etc.)
+    // (YieldableError, type symbols, Symbol.iterator, pipe(), etc.)
     const BaseTaggedError = Data.TaggedError(tag) as unknown as new (args: {
       message?: string;
       cause?: unknown;
       code: TCode;
       status: number;
-      data: TData;
+      data: InferSchemaOutput<TSchema>;
       defined: boolean;
     }) => Cause.YieldableError & {
       readonly _tag: TTag;
       readonly code: TCode;
       readonly status: number;
-      readonly data: TData;
+      readonly data: InferSchemaOutput<TSchema>;
       readonly defined: boolean;
     };
 
     class ORPCTaggedErrorBase extends BaseTaggedError {
+      static readonly schema = schema;
       static readonly _tag = tag;
       static readonly code = code;
 
-      readonly [ORPCErrorSymbol]: ORPCError<TCode, TData>;
+      readonly [ORPCErrorSymbol]: ORPCError<TCode, InferSchemaOutput<TSchema>>;
 
       constructor(
-        ...rest: MaybeOptionalOptions<ORPCTaggedErrorOptions<TData>>
+        ...rest: MaybeOptionalOptions<
+          ORPCTaggedErrorOptions<InferSchemaOutput<TSchema>>
+        >
       ) {
         const opts = resolveMaybeOptionalOptions(rest);
         const status = opts.status ?? defaultStatus;
@@ -275,21 +331,25 @@ export function ORPCTaggedError<
         const finalStatus = fallbackORPCErrorStatus(code, status);
         const finalMessage = fallbackORPCErrorMessage(code, inputMessage);
 
+        const data = opts.data as InferSchemaOutput<TSchema>;
         // Pass to Effect's TaggedError - it spreads these onto the instance
         super({
           message: finalMessage,
           cause: opts.cause,
           code,
           status: finalStatus,
-          data: opts.data as TData,
+          data,
           defined: opts.defined ?? true,
         });
 
         // Create the underlying ORPCError for interop
-        this[ORPCErrorSymbol] = new ORPCError(code, {
+        this[ORPCErrorSymbol] = new ORPCError<
+          TCode,
+          InferSchemaOutput<TSchema>
+        >(code, {
           status: finalStatus,
           message: finalMessage,
-          data: opts.data as TData,
+          data,
           defined: this.defined,
           cause: opts.cause,
         });
@@ -299,11 +359,11 @@ export function ORPCTaggedError<
        * Converts this error to a plain ORPCError.
        * Useful when you need to return from an oRPC handler.
        */
-      toORPCError(): ORPCError<TCode, TData> {
+      toORPCError(): ORPCError<TCode, TSchema> {
         return this[ORPCErrorSymbol];
       }
 
-      override toJSON(): ORPCErrorJSON<TCode, TData> & { _tag: TTag } {
+      override toJSON(): ORPCErrorJSON<TCode, TSchema> & { _tag: TTag } {
         return {
           _tag: this._tag,
           defined: this.defined,
@@ -318,7 +378,7 @@ export function ORPCTaggedError<
     return ORPCTaggedErrorBase as any;
   };
 
-  return factory as ORPCTaggedErrorFactory<Self, TData>;
+  return factory as ORPCTaggedErrorFactory<TSchema>;
 }
 
 /**
@@ -337,9 +397,12 @@ export function ORPCTaggedError<
  * })
  * ```
  */
-export function toORPCError<TCode extends ORPCErrorCode, TData>(
-  error: ORPCTaggedErrorInstance<string, TCode, TData>,
-): ORPCError<TCode, TData> {
+export function toORPCError<
+  TCode extends ORPCErrorCode,
+  TSchema extends AnySchema = AnySchema,
+>(
+  error: ORPCTaggedErrorInstance<string, TCode, TSchema>,
+): ORPCError<TCode, InferSchemaOutput<TSchema>> {
   return error[ORPCErrorSymbol];
 }
 
@@ -353,6 +416,15 @@ export function toORPCError<TCode extends ORPCErrorCode, TData>(
 export type EffectErrorMapItem =
   | ErrorMapItem<AnySchema>
   | AnyORPCTaggedErrorClass;
+
+export type ORPCTaggedErrorClassToErrorMapItem<T> =
+  T extends ORPCTaggedErrorClass<any, any, infer TData>
+    ? {
+        status?: number;
+        message?: string;
+        data?: TData;
+      }
+    : never;
 
 /**
  * Extended error map that supports both traditional oRPC errors and ORPCTaggedError classes.
@@ -378,7 +450,7 @@ export type EffectErrorMap = {
 export type MergedEffectErrorMap<
   T1 extends EffectErrorMap,
   T2 extends EffectErrorMap,
-> = T1 & T2;
+> = Omit<T1, keyof T2> & T2;
 
 /**
  * Extracts the instance type from an EffectErrorMapItem
@@ -404,40 +476,10 @@ export type EffectErrorMapToUnion<T extends EffectErrorMap> = {
 }[keyof T];
 
 /**
- * Type for the error constructors available in Effect handlers.
- * For tagged errors, it's the class constructor itself.
- * For traditional errors, it's a function that creates ORPCError.
- */
-export type EffectErrorConstructorMapItem<
-  TCode extends ORPCErrorCode,
-  T extends EffectErrorMapItem,
-> =
-  T extends ORPCTaggedErrorClass<infer _TTag, TCode, infer TData>
-    ? (
-        ...args: MaybeOptionalOptions<ORPCTaggedErrorOptions<TData>>
-      ) => ORPCTaggedErrorInstance<_TTag, TCode, TData>
-    : T extends { data?: infer TData }
-      ? (
-          ...args: MaybeOptionalOptions<
-            ORPCErrorConstructorMapItemOptions<TData>
-          >
-        ) => ORPCError<TCode, TData>
-      : (
-          ...args: MaybeOptionalOptions<
-            ORPCErrorConstructorMapItemOptions<unknown>
-          >
-        ) => ORPCError<TCode, unknown>;
-
-/**
  * Constructor map for EffectErrorMap - provides typed error constructors for handlers.
  */
-export type EffectErrorConstructorMap<T extends EffectErrorMap> = {
-  [K in keyof T]: K extends ORPCErrorCode
-    ? T[K] extends EffectErrorMapItem
-      ? EffectErrorConstructorMapItem<K, T[K]>
-      : never
-    : never;
-};
+export type EffectErrorConstructorMap<T extends EffectErrorMap> =
+  ORPCErrorConstructorMap<EffectErrorMapToErrorMap<T>>;
 
 /**
  * Creates an error constructor map from an EffectErrorMap.
@@ -490,11 +532,11 @@ export function createEffectErrorConstructorMap<T extends EffectErrorMap>(
  */
 export function effectErrorMapToErrorMap<T extends EffectErrorMap>(
   errorMap: T | undefined,
-): ErrorMap {
+): EffectErrorMapToErrorMap<T> {
   const result: ErrorMap = {};
 
   if (!errorMap) {
-    return result;
+    return result as ErrorMap & EffectErrorMapToErrorMap<T>;
   }
 
   for (const [code, ClassOrErrorItem] of Object.entries(errorMap)) {
@@ -503,19 +545,28 @@ export function effectErrorMapToErrorMap<T extends EffectErrorMap>(
     }
 
     if (isORPCTaggedErrorClass(ClassOrErrorItem)) {
-      const error = new ClassOrErrorItem().toORPCError();
-
+      const classInstance = new ClassOrErrorItem();
       // For tagged errors, we create a minimal entry
       // The actual validation will be handled by the tagged error class
-      result[code] = {
-        status: error.status,
-        message: error.message,
-        data: error.data,
+      result[classInstance.code] = {
+        status: classInstance.status,
+        message: classInstance.message,
+        data: classInstance.schema,
       };
     } else {
       result[code] = ClassOrErrorItem;
     }
   }
 
-  return result;
+  return result as ErrorMap & EffectErrorMapToErrorMap<T>;
+}
+
+export function mergeAnyErrorMaps<
+  T1 extends EffectErrorMap,
+  T2 extends EffectErrorMap,
+>(map1: T1, map2: T2): EffectErrorMapToErrorMap<T1 & T2> {
+  return {
+    ...map1,
+    ...map2,
+  } as EffectErrorMapToErrorMap<T1 & T2>;
 }

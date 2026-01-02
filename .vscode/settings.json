@@ -53,7 +53,8 @@
     "editor.defaultFormatter": "oxc.oxc-vscode"
   },
   "editor.codeActionsOnSave": {
-    "source.fixAll.oxc": "explicit"
+    "source.fixAll.oxc": "explicit",
+    "source.organizeImports": "explicit"
   },
   "oxc.enable": true
 }

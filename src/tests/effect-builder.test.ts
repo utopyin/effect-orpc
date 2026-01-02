@@ -6,6 +6,7 @@ import z from "zod";
 
 import { EffectBuilder, makeEffectORPC } from "../effect-builder";
 import { EffectDecoratedProcedure } from "../effect-procedure";
+import { effectErrorMapToErrorMap, ORPCTaggedError } from "../tagged-error";
 import {
   baseErrorMap,
   baseMeta,
@@ -25,7 +26,7 @@ const def = {
   },
   middlewares: [mid],
   errorMap: baseErrorMap,
-  effectErrorMap: {},
+  effectErrorMap: baseErrorMap,
   inputSchema,
   outputSchema,
   inputValidationIndex: 99,
@@ -46,16 +47,20 @@ describe("effectBuilder", () => {
   });
 
   it(".errors", () => {
-    const errors = { BAD_GATEWAY: { message: "BAD" } };
+    class BadGatewayError extends ORPCTaggedError(
+      z.object({ why: z.string() }),
+    )("BadGatewayError") {}
+    const errors = { BadGatewayError };
 
     const applied = builder.errors(errors);
     expect(applied).instanceOf(EffectBuilder);
     expect(applied).not.toBe(builder);
 
-    expect(applied["~orpc"]).toEqual({
+    const effectErrorMap = { ...def.errorMap, ...errors };
+    expect(applied["~effect"]).toEqual({
       ...def,
-      effectErrorMap: errors,
-      errorMap: { ...def.errorMap, ...errors },
+      effectErrorMap,
+      errorMap: effectErrorMapToErrorMap(effectErrorMap),
     });
   });
 
@@ -66,7 +71,7 @@ describe("effectBuilder", () => {
 
       expect(applied).instanceOf(EffectBuilder);
       expect(applied).not.toBe(builder);
-      expect(applied["~orpc"]).toEqual({
+      expect(applied["~effect"]).toEqual({
         ...def,
         middlewares: [mid, mid2],
       });
@@ -79,7 +84,7 @@ describe("effectBuilder", () => {
 
     expect(applied).instanceOf(EffectBuilder);
     expect(applied).not.toBe(builder);
-    expect(applied["~orpc"]).toEqual({
+    expect(applied["~effect"]).toEqual({
       ...def,
       meta: { ...def.meta, ...meta },
     });
@@ -91,7 +96,7 @@ describe("effectBuilder", () => {
 
     expect(applied).instanceOf(EffectBuilder);
     expect(applied).not.toBe(builder);
-    expect(applied["~orpc"]).toEqual({
+    expect(applied["~effect"]).toEqual({
       ...def,
       route: { ...def.route, ...route },
     });
@@ -102,7 +107,7 @@ describe("effectBuilder", () => {
 
     expect(applied).instanceOf(EffectBuilder);
     expect(applied).not.toBe(builder);
-    expect(applied["~orpc"]).toEqual({
+    expect(applied["~effect"]).toEqual({
       ...def,
       inputSchema: generalSchema,
       inputValidationIndex: 12,
@@ -114,7 +119,7 @@ describe("effectBuilder", () => {
 
     expect(applied).instanceOf(EffectBuilder);
     expect(applied).not.toBe(builder);
-    expect(applied["~orpc"]).toEqual({
+    expect(applied["~effect"]).toEqual({
       ...def,
       outputSchema: generalSchema,
       outputValidationIndex: 23,
@@ -129,8 +134,8 @@ describe("effectBuilder", () => {
     const applied = builder.effect(effectFn);
 
     expect(applied).instanceOf(EffectDecoratedProcedure);
-    expect(applied["~orpc"].runtime).toBe(runtime);
-    expect(applied["~orpc"].handler).toBeInstanceOf(Function);
+    expect(applied["~effect"].runtime).toBe(runtime);
+    expect(applied["~effect"].handler).toBeInstanceOf(Function);
   });
 
   it(".effect runs effect with runtime", async () => {
@@ -141,7 +146,7 @@ describe("effectBuilder", () => {
 
     const applied = builder.effect(effectFn);
 
-    const result = await applied["~orpc"].handler({
+    const result = await applied["~effect"].handler({
       context: {},
       input: "test-input",
       path: ["test"],
@@ -161,19 +166,27 @@ describe("makeEffectORPC factory", () => {
     const effectBuilder = makeEffectORPC(runtime);
 
     expect(effectBuilder).instanceOf(EffectBuilder);
-    expect(effectBuilder["~orpc"].runtime).toBe(runtime);
+    expect(effectBuilder["~effect"].runtime).toBe(runtime);
     // Should inherit os's default definition
-    expect(effectBuilder["~orpc"].middlewares).toEqual(os["~orpc"].middlewares);
-    expect(effectBuilder["~orpc"].effectErrorMap).toEqual(os["~orpc"].errorMap);
+    expect(effectBuilder["~effect"].middlewares).toEqual(
+      os["~orpc"].middlewares,
+    );
+    expect(effectBuilder["~effect"].effectErrorMap).toEqual(
+      os["~orpc"].errorMap,
+    );
   });
 
   it("wraps a custom builder when provided", () => {
     const effectBuilder = makeEffectORPC(runtime, os);
 
     expect(effectBuilder).instanceOf(EffectBuilder);
-    expect(effectBuilder["~orpc"].runtime).toBe(runtime);
-    expect(effectBuilder["~orpc"].middlewares).toEqual(os["~orpc"].middlewares);
-    expect(effectBuilder["~orpc"].effectErrorMap).toEqual(os["~orpc"].errorMap);
+    expect(effectBuilder["~effect"].runtime).toBe(runtime);
+    expect(effectBuilder["~effect"].middlewares).toEqual(
+      os["~orpc"].middlewares,
+    );
+    expect(effectBuilder["~effect"].effectErrorMap).toEqual(
+      os["~orpc"].errorMap,
+    );
   });
 
   it("creates working procedure with default os", async () => {
@@ -184,7 +197,7 @@ describe("makeEffectORPC factory", () => {
       return "hello";
     });
 
-    const result = await procedure["~orpc"].handler({
+    const result = await procedure["~effect"].handler({
       context: {},
       input: undefined,
       path: ["test"],
@@ -207,7 +220,7 @@ describe("makeEffectORPC factory", () => {
       return a + b;
     });
 
-    const result = await procedure["~orpc"].handler({
+    const result = await procedure["~effect"].handler({
       context: {},
       input: undefined,
       path: ["test"],
@@ -235,9 +248,9 @@ describe("makeEffectORPC factory", () => {
       });
 
     expect(procedure).instanceOf(EffectDecoratedProcedure);
-    expect(procedure["~orpc"].errorMap).toHaveProperty("NOT_FOUND");
-    expect(procedure["~orpc"].meta).toEqual({ auth: true });
-    expect(procedure["~orpc"].route).toEqual({ path: "/test" });
+    expect(procedure["~effect"].errorMap).toHaveProperty("NOT_FOUND");
+    expect(procedure["~effect"].meta).toEqual({ auth: true });
+    expect(procedure["~effect"].route).toEqual({ path: "/test" });
   });
 
   it("wraps a customized builder", () => {
@@ -247,10 +260,10 @@ describe("makeEffectORPC factory", () => {
 
     const effectBuilder = makeEffectORPC(runtime, customBuilder);
 
-    expect(effectBuilder["~orpc"].effectErrorMap).toHaveProperty(
+    expect(effectBuilder["~effect"].effectErrorMap).toHaveProperty(
       "CUSTOM_ERROR",
     );
-    expect(effectBuilder["~orpc"].middlewares.length).toBe(1);
+    expect(effectBuilder["~effect"].middlewares.length).toBe(1);
   });
 });
 
@@ -279,7 +292,7 @@ describe("effect with services", () => {
       return yield* counter.increment(input as number);
     });
 
-    const result = await procedure["~orpc"].handler({
+    const result = await procedure["~effect"].handler({
       context: {},
       input: 5,
       path: ["test"],
@@ -304,9 +317,9 @@ describe(".traced", () => {
 
     expect(traced).instanceOf(EffectBuilder);
     expect(traced).not.toBe(effectBuilder);
-    expect(traced["~orpc"].spanConfig).toBeDefined();
-    expect(traced["~orpc"].spanConfig?.name).toBe("users.getUser");
-    expect(traced["~orpc"].spanConfig?.captureStackTrace).toBeInstanceOf(
+    expect(traced["~effect"].spanConfig).toBeDefined();
+    expect(traced["~effect"].spanConfig?.name).toBe("users.getUser");
+    expect(traced["~effect"].spanConfig?.captureStackTrace).toBeInstanceOf(
       Function,
     );
   });
@@ -337,7 +350,7 @@ describe(".traced", () => {
         return { id: input.id, name: "Alice" };
       });
 
-    const result = await procedure["~orpc"].handler({
+    const result = await procedure["~effect"].handler({
       context: {},
       input: { id: "123" },
       path: ["users", "getUser"],
@@ -359,7 +372,7 @@ describe(".traced", () => {
       return a + b;
     });
 
-    const result = await procedure["~orpc"].handler({
+    const result = await procedure["~effect"].handler({
       context: {},
       input: undefined,
       path: ["math", "add"],
@@ -378,7 +391,7 @@ describe(".traced", () => {
     // The stack trace is captured when .traced() is called
     const traced = effectBuilder.traced("test.procedure");
 
-    const stackTrace = traced["~orpc"].spanConfig?.captureStackTrace();
+    const stackTrace = traced["~effect"].spanConfig?.captureStackTrace();
     // The stack trace should be a string containing the file location
     // It may be undefined in some test environments
     if (stackTrace !== undefined) {
@@ -399,7 +412,7 @@ describe("default tracing (without .traced())", () => {
         return { id: input.id, name: "Bob" };
       });
 
-    const result = await procedure["~orpc"].handler({
+    const result = await procedure["~effect"].handler({
       context: {},
       input: { id: "456" },
       path: ["users", "findById"],
@@ -422,7 +435,7 @@ describe("default tracing (without .traced())", () => {
     });
 
     // The procedure should work with any path
-    const result = await procedure["~orpc"].handler({
+    const result = await procedure["~effect"].handler({
       context: {},
       input: undefined,
       path: ["api", "v1", "greet"],
@@ -447,7 +460,7 @@ describe("default tracing (without .traced())", () => {
       },
     );
 
-    const result = await procedure["~orpc"].handler({
+    const result = await procedure["~effect"].handler({
       context: {},
       input: undefined,
       path: ["math", "multiply"],
@@ -479,7 +492,7 @@ describe("default tracing (without .traced())", () => {
         return yield* Greeter.greet(input.name);
       });
 
-    const result = await procedure["~orpc"].handler({
+    const result = await procedure["~effect"].handler({
       context: {},
       input: { name: "World" },
       path: ["greeting", "say"],
@@ -498,9 +511,9 @@ describe("default tracing (without .traced())", () => {
     const effectBuilder = makeEffectORPC(runtime);
 
     // Without .traced(), spanConfig should be undefined
-    expect(effectBuilder["~orpc"].spanConfig).toBeUndefined();
+    expect(effectBuilder["~effect"].spanConfig).toBeUndefined();
 
     const withInput = effectBuilder.input(z.string());
-    expect(withInput["~orpc"].spanConfig).toBeUndefined();
+    expect(withInput["~effect"].spanConfig).toBeUndefined();
   });
 });

@@ -67,7 +67,7 @@ describe("effectDecoratedProcedure", () => {
     expect(applied).not.toBe(decorated);
     expect(applied).toBeInstanceOf(EffectDecoratedProcedure);
 
-    expect(applied["~orpc"]).toEqual({
+    expect(applied["~effect"]).toEqual({
       ...def,
       effectErrorMap: errors,
       errorMap: {
@@ -80,7 +80,7 @@ describe("effectDecoratedProcedure", () => {
     });
 
     // Preserves runtime
-    expect(applied["~orpc"].runtime).toBe(runtime);
+    expect(applied["~effect"].runtime).toBe(runtime);
   });
 
   it(".meta", () => {
@@ -90,13 +90,13 @@ describe("effectDecoratedProcedure", () => {
     expect(applied).not.toBe(decorated);
     expect(applied).toBeInstanceOf(EffectDecoratedProcedure);
 
-    expect(applied["~orpc"]).toEqual({
+    expect(applied["~effect"]).toEqual({
       ...def,
       meta: { ...def.meta, ...meta },
     });
 
     // Preserves runtime
-    expect(applied["~orpc"].runtime).toBe(runtime);
+    expect(applied["~effect"].runtime).toBe(runtime);
   });
 
   it(".route", () => {
@@ -106,13 +106,13 @@ describe("effectDecoratedProcedure", () => {
     expect(applied).not.toBe(decorated);
     expect(applied).toBeInstanceOf(EffectDecoratedProcedure);
 
-    expect(applied["~orpc"]).toEqual({
+    expect(applied["~effect"]).toEqual({
       ...def,
       route: { ...def.route, ...route },
     });
 
     // Preserves runtime
-    expect(applied["~orpc"].runtime).toBe(runtime);
+    expect(applied["~effect"].runtime).toBe(runtime);
   });
 
   describe(".use", () => {
@@ -123,13 +123,13 @@ describe("effectDecoratedProcedure", () => {
       expect(applied).not.toBe(decorated);
       expect(applied).toBeInstanceOf(EffectDecoratedProcedure);
 
-      expect(applied["~orpc"]).toEqual({
+      expect(applied["~effect"]).toEqual({
         ...def,
         middlewares: [...def.middlewares, mid],
       });
 
       // Preserves runtime
-      expect(applied["~orpc"].runtime).toBe(runtime);
+      expect(applied["~effect"].runtime).toBe(runtime);
     });
 
     it("with map input", () => {
@@ -140,13 +140,13 @@ describe("effectDecoratedProcedure", () => {
       expect(applied).not.toBe(decorated);
       expect(applied).toBeInstanceOf(EffectDecoratedProcedure);
 
-      expect(applied["~orpc"]).toEqual({
+      expect(applied["~effect"]).toEqual({
         ...def,
         middlewares: [...def.middlewares, [mid, map]],
       });
 
       // Preserves runtime
-      expect(applied["~orpc"].runtime).toBe(runtime);
+      expect(applied["~effect"].runtime).toBe(runtime);
     });
   });
 
@@ -207,7 +207,7 @@ describe("effectDecoratedProcedure chaining", () => {
       .route({ path: "/custom" });
 
     expect(applied).toBeInstanceOf(EffectDecoratedProcedure);
-    expect(applied["~orpc"].runtime).toBe(runtime);
-    expect(applied["~orpc"].errorMap).toHaveProperty("CUSTOM");
+    expect(applied["~effect"].runtime).toBe(runtime);
+    expect(applied["~effect"].errorMap).toHaveProperty("CUSTOM");
   });
 });

@@ -1,40 +1,41 @@
 import { ORPCError } from "@orpc/client";
 import { Effect, Exit } from "effect";
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
+import z from "zod";
 
 import {
   isORPCTaggedError,
   ORPCErrorSymbol,
   ORPCTaggedError,
+  type TagToCode,
   toORPCError,
 } from "../tagged-error";
 
 // Define test errors with explicit code
-class UserNotFoundError extends ORPCTaggedError<UserNotFoundError>()(
+class UserNotFoundError extends ORPCTaggedError()(
   "UserNotFoundError",
   "NOT_FOUND",
 ) {}
 
-class ValidationError extends ORPCTaggedError<
-  ValidationError,
-  { fields: string[] }
->()("ValidationError", "BAD_REQUEST", { message: "Validation failed" }) {}
+class ValidationError extends ORPCTaggedError(
+  z.object({ fields: z.array(z.string()) }),
+)("ValidationError", "BAD_REQUEST", { message: "Validation failed" }) {}
 
-class CustomStatusError extends ORPCTaggedError<CustomStatusError>()(
+class CustomStatusError extends ORPCTaggedError()(
   "CustomStatusError",
   "INTERNAL_SERVER_ERROR",
   { status: 503, message: "Service unavailable" },
 ) {}
 
 // Define test errors with default code (derived from tag)
-class AutoCodeError extends ORPCTaggedError<AutoCodeError>()("AutoCodeError") {}
+class AutoCodeError extends ORPCTaggedError()("AutoCodeError") {}
 
-class AutoCodeWithOptionsError extends ORPCTaggedError<AutoCodeWithOptionsError>()(
+class AutoCodeWithOptionsError extends ORPCTaggedError()(
   "AutoCodeWithOptionsError",
   { message: "Auto code error message" },
 ) {}
 
-class MyCustomError extends ORPCTaggedError<MyCustomError>()("MyCustomError") {}
+class MyCustomError extends ORPCTaggedError()("MyCustomError") {}
 
 describe("class ORPCTaggedError", () => {
   describe("basic functionality", () => {
@@ -306,6 +307,79 @@ describe("class ORPCTaggedError", () => {
 
       // Unknown codes default to 500
       expect(error.status).toBe(500);
+    });
+
+    describe("TagToCode edge cases", () => {
+      describe("runtime behavior", () => {
+        it("should keep consecutive uppercase letters together", () => {
+          class TESTError extends ORPCTaggedError()("TEST") {}
+          expect(TESTError.code).toBe("TEST");
+        });
+
+        it("should handle single word tags", () => {
+          class TestError extends ORPCTaggedError()("Test") {}
+          expect(TestError.code).toBe("TEST");
+        });
+
+        it("should split between words correctly", () => {
+          class TestTestError extends ORPCTaggedError()("TestTest") {}
+          expect(TestTestError.code).toBe("TEST_TEST");
+        });
+
+        it("should handle tags with single uppercase followed by lowercase", () => {
+          class UnauthorizedError extends ORPCTaggedError()(
+            "UnauthorizedError",
+          ) {}
+          expect(UnauthorizedError.code).toBe("UNAUTHORIZED_ERROR");
+        });
+
+        it("should handle mixed case patterns", () => {
+          class HTTPError extends ORPCTaggedError()("HTTPError") {}
+          expect(HTTPError.code).toBe("HTTP_ERROR");
+
+          class XMLParserError extends ORPCTaggedError()("XMLParserError") {}
+          expect(XMLParserError.code).toBe("XML_PARSER_ERROR");
+        });
+      });
+
+      describe("type-level behavior", () => {
+        it("should correctly type consecutive uppercase letters", () => {
+          expectTypeOf<TagToCode<"TEST">>().toEqualTypeOf<"TEST">();
+        });
+
+        it("should correctly type single word tags", () => {
+          expectTypeOf<TagToCode<"Test">>().toEqualTypeOf<"TEST">();
+        });
+
+        it("should correctly type word splitting", () => {
+          expectTypeOf<TagToCode<"TestTest">>().toEqualTypeOf<"TEST_TEST">();
+        });
+
+        it("should correctly type single uppercase followed by lowercase", () => {
+          expectTypeOf<
+            TagToCode<"UnauthorizedError">
+          >().toEqualTypeOf<"UNAUTHORIZED_ERROR">();
+        });
+
+        it("should correctly type mixed case patterns", () => {
+          expectTypeOf<TagToCode<"HTTPError">>().toEqualTypeOf<"HTTP_ERROR">();
+          expectTypeOf<
+            TagToCode<"XMLParserError">
+          >().toEqualTypeOf<"XML_PARSER_ERROR">();
+        });
+
+        it("should correctly type complex patterns", () => {
+          expectTypeOf<
+            TagToCode<"UserNotFoundError">
+          >().toEqualTypeOf<"USER_NOT_FOUND_ERROR">();
+          expectTypeOf<
+            TagToCode<"AutoCodeError">
+          >().toEqualTypeOf<"AUTO_CODE_ERROR">();
+          expectTypeOf<
+            TagToCode<"MyCustomError">
+          >().toEqualTypeOf<"MY_CUSTOM_ERROR">();
+        });
+      });
     });
   });
 });

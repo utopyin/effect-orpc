@@ -1,7 +1,6 @@
 import type { ClientContext } from "@orpc/client";
 import type {
   AnySchema,
-  ErrorMap,
   InferSchemaInput,
   InferSchemaOutput,
   Meta,
@@ -15,13 +14,11 @@ import type {
   MergedCurrentContext,
   MergedInitialContext,
   Middleware,
-  ORPCErrorConstructorMap,
   ProcedureActionableClient,
   ProcedureClient,
   ProcedureDef,
 } from "@orpc/server";
 import type { IntersectPick, MaybeOptionalOptions } from "@orpc/shared";
-import type { ManagedRuntime } from "effect";
 
 import { mergeMeta, mergeRoute } from "@orpc/contract";
 import {
@@ -32,14 +29,16 @@ import {
   Procedure,
 } from "@orpc/server";
 
-import type { EffectErrorMap, MergedEffectErrorMap } from "./tagged-error";
+import type {
+  EffectErrorConstructorMap,
+  EffectErrorMap,
+  MergedEffectErrorMap,
+} from "./tagged-error";
+import type { EffectErrorMapToErrorMap, EffectProcedureDef } from "./types";
 
 import { effectErrorMapToErrorMap } from "./tagged-error";
 
-/**
- * Extended procedure definition that includes the Effect ManagedRuntime.
- */
-export interface EffectProcedureDef<
+export class EffectProcedure<
   TInitialContext extends Context,
   TCurrentContext extends Context,
   TInputSchema extends AnySchema,
@@ -48,16 +47,54 @@ export interface EffectProcedureDef<
   TMeta extends Meta,
   TRequirementsProvided,
   TRuntimeError,
-> extends ProcedureDef<
+> extends Procedure<
   TInitialContext,
   TCurrentContext,
   TInputSchema,
   TOutputSchema,
-  ErrorMap,
+  EffectErrorMapToErrorMap<TEffectErrorMap>,
   TMeta
 > {
-  runtime: ManagedRuntime.ManagedRuntime<TRequirementsProvided, TRuntimeError>;
-  effectErrorMap: TEffectErrorMap;
+  /**
+   * This property holds the defined options and the effect-specific properties.
+   */
+  declare "~effect": EffectProcedureDef<
+    TInitialContext,
+    TCurrentContext,
+    TInputSchema,
+    TOutputSchema,
+    TEffectErrorMap,
+    TMeta,
+    TRequirementsProvided,
+    TRuntimeError
+  >;
+  /**
+   * This property holds the defined options.
+   */
+  declare "~orpc": ProcedureDef<
+    TInitialContext,
+    TCurrentContext,
+    TInputSchema,
+    TOutputSchema,
+    EffectErrorMapToErrorMap<TEffectErrorMap>,
+    TMeta
+  >;
+
+  constructor(
+    def: EffectProcedureDef<
+      TInitialContext,
+      TCurrentContext,
+      TInputSchema,
+      TOutputSchema,
+      TEffectErrorMap,
+      TMeta,
+      TRequirementsProvided,
+      TRuntimeError
+    >,
+  ) {
+    super(def);
+    this["~effect"] = def;
+  }
 }
 
 /**
@@ -75,15 +112,20 @@ export class EffectDecoratedProcedure<
   TMeta extends Meta,
   TRequirementsProvided,
   TRuntimeError,
-> extends Procedure<
+> extends EffectProcedure<
   TInitialContext,
   TCurrentContext,
   TInputSchema,
   TOutputSchema,
-  ErrorMap,
-  TMeta
+  TEffectErrorMap,
+  TMeta,
+  TRequirementsProvided,
+  TRuntimeError
 > {
-  declare "~orpc": EffectProcedureDef<
+  /**
+   * This property holds the defined options and the effect-specific properties.
+   */
+  declare "~effect": EffectProcedureDef<
     TInitialContext,
     TCurrentContext,
     TInputSchema,
@@ -92,6 +134,14 @@ export class EffectDecoratedProcedure<
     TMeta,
     TRequirementsProvided,
     TRuntimeError
+  >;
+  declare "~orpc": ProcedureDef<
+    TInitialContext,
+    TCurrentContext,
+    TInputSchema,
+    TOutputSchema,
+    EffectErrorMapToErrorMap<TEffectErrorMap>,
+    TMeta
   >;
 
   constructor(
@@ -107,6 +157,7 @@ export class EffectDecoratedProcedure<
     >,
   ) {
     super(def);
+    this["~effect"] = def;
   }
 
   /**
@@ -127,9 +178,12 @@ export class EffectDecoratedProcedure<
     TRequirementsProvided,
     TRuntimeError
   > {
-    const newEffectErrorMap = { ...this["~orpc"].effectErrorMap, ...errors };
+    const newEffectErrorMap: MergedEffectErrorMap<TEffectErrorMap, U> = {
+      ...this["~effect"].effectErrorMap,
+      ...errors,
+    };
     return new EffectDecoratedProcedure({
-      ...this["~orpc"],
+      ...this["~effect"],
       effectErrorMap: newEffectErrorMap,
       errorMap: effectErrorMapToErrorMap(newEffectErrorMap),
     });
@@ -154,8 +208,8 @@ export class EffectDecoratedProcedure<
     TRuntimeError
   > {
     return new EffectDecoratedProcedure({
-      ...this["~orpc"],
-      meta: mergeMeta(this["~orpc"].meta, meta),
+      ...this["~effect"],
+      meta: mergeMeta(this["~effect"].meta, meta),
     });
   }
 
@@ -180,8 +234,8 @@ export class EffectDecoratedProcedure<
     TRuntimeError
   > {
     return new EffectDecoratedProcedure({
-      ...this["~orpc"],
-      route: mergeRoute(this["~orpc"].route, route),
+      ...this["~effect"],
+      route: mergeRoute(this["~effect"].route, route),
     });
   }
 
@@ -202,7 +256,7 @@ export class EffectDecoratedProcedure<
       UOutContext,
       InferSchemaOutput<TInputSchema>,
       InferSchemaInput<TOutputSchema>,
-      ORPCErrorConstructorMap<ErrorMap>,
+      EffectErrorConstructorMap<TEffectErrorMap>,
       TMeta
     >,
   ): EffectDecoratedProcedure<
@@ -234,7 +288,7 @@ export class EffectDecoratedProcedure<
       UOutContext,
       UInput,
       InferSchemaInput<TOutputSchema>,
-      ORPCErrorConstructorMap<ErrorMap>,
+      EffectErrorConstructorMap<TEffectErrorMap>,
       TMeta
     >,
     mapInput: MapInputMiddleware<InferSchemaOutput<TInputSchema>, UInput>,
@@ -258,8 +312,8 @@ export class EffectDecoratedProcedure<
       : middleware;
 
     return new EffectDecoratedProcedure({
-      ...this["~orpc"],
-      middlewares: addMiddleware(this["~orpc"].middlewares, mapped),
+      ...this["~effect"],
+      middlewares: addMiddleware(this["~effect"].middlewares, mapped),
     });
   }
 
@@ -273,7 +327,7 @@ export class EffectDecoratedProcedure<
       CreateProcedureClientOptions<
         TInitialContext,
         TOutputSchema,
-        ErrorMap,
+        EffectErrorMapToErrorMap<TEffectErrorMap>,
         TMeta,
         TClientContext
       >
@@ -288,12 +342,17 @@ export class EffectDecoratedProcedure<
     TRequirementsProvided,
     TRuntimeError
   > &
-    ProcedureClient<TClientContext, TInputSchema, TOutputSchema, ErrorMap> {
+    ProcedureClient<
+      TClientContext,
+      TInputSchema,
+      TOutputSchema,
+      EffectErrorMapToErrorMap<TEffectErrorMap>
+    > {
     const client: ProcedureClient<
       TClientContext,
       TInputSchema,
       TOutputSchema,
-      ErrorMap
+      EffectErrorMapToErrorMap<TEffectErrorMap>
     > = createProcedureClient(this, ...rest);
 
     return new Proxy(client, {
@@ -318,7 +377,7 @@ export class EffectDecoratedProcedure<
       CreateProcedureClientOptions<
         TInitialContext,
         TOutputSchema,
-        ErrorMap,
+        EffectErrorMapToErrorMap<TEffectErrorMap>,
         TMeta,
         Record<never, never>
       >
@@ -333,11 +392,15 @@ export class EffectDecoratedProcedure<
     TRequirementsProvided,
     TRuntimeError
   > &
-    ProcedureActionableClient<TInputSchema, TOutputSchema, ErrorMap> {
+    ProcedureActionableClient<
+      TInputSchema,
+      TOutputSchema,
+      EffectErrorMapToErrorMap<TEffectErrorMap>
+    > {
     const action: ProcedureActionableClient<
       TInputSchema,
       TOutputSchema,
-      ErrorMap
+      EffectErrorMapToErrorMap<TEffectErrorMap>
     > = createActionableClient(createProcedureClient(this, ...rest));
 
     return new Proxy(action, {

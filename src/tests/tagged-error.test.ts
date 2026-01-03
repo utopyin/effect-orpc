@@ -323,7 +323,6 @@ describe("class ORPCTaggedError", () => {
 
         it("should handle mixed case patterns", () => {
           class HTTPError extends ORPCTaggedError("HTTPError") {}
-          console.log(HTTPError);
           expect(HTTPError.code).toBe("HTTP_ERROR");
 
           class XMLParserError extends ORPCTaggedError("XMLParserError") {}

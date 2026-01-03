@@ -12,30 +12,35 @@ import {
 } from "../tagged-error";
 
 // Define test errors with explicit code
-class UserNotFoundError extends ORPCTaggedError()(
-  "UserNotFoundError",
-  "NOT_FOUND",
-) {}
+class UserNotFoundError extends ORPCTaggedError("UserNotFoundError", {
+  code: "NOT_FOUND",
+}) {}
 
-class ValidationError extends ORPCTaggedError(
-  z.object({ fields: z.array(z.string()) }),
-)("ValidationError", "BAD_REQUEST", { message: "Validation failed" }) {}
+class ValidationError extends ORPCTaggedError("ValidationError", {
+  schema: z.object({ fields: z.array(z.string()) }),
+  code: "BAD_REQUEST",
+  message: "Validation failed",
+}) {}
 
-class CustomStatusError extends ORPCTaggedError()(
-  "CustomStatusError",
-  "INTERNAL_SERVER_ERROR",
-  { status: 503, message: "Service unavailable" },
-) {}
+class CustomStatusError extends ORPCTaggedError("CustomStatusError", {
+  code: "INTERNAL_SERVER_ERROR",
+  status: 503,
+  message: "Service unavailable",
+}) {}
 
 // Define test errors with default code (derived from tag)
-class AutoCodeError extends ORPCTaggedError()("AutoCodeError") {}
+class AutoCodeError extends ORPCTaggedError("AutoCodeError", {
+  code: "AUTO_CODE_ERROR",
+}) {}
 
-class AutoCodeWithOptionsError extends ORPCTaggedError()(
+class AutoCodeWithOptionsError extends ORPCTaggedError(
   "AutoCodeWithOptionsError",
   { message: "Auto code error message" },
 ) {}
 
-class MyCustomError extends ORPCTaggedError()("MyCustomError") {}
+class MyCustomError extends ORPCTaggedError("MyCustomError", {
+  code: "MY_CUSTOM_ERROR",
+}) {}
 
 describe("class ORPCTaggedError", () => {
   describe("basic functionality", () => {
@@ -295,32 +300,33 @@ describe("class ORPCTaggedError", () => {
     describe("TagToCode edge cases", () => {
       describe("runtime behavior", () => {
         it("should keep consecutive uppercase letters together", () => {
-          class TESTError extends ORPCTaggedError()("TEST") {}
+          class TESTError extends ORPCTaggedError("TEST") {}
           expect(TESTError.code).toBe("TEST");
         });
 
         it("should handle single word tags", () => {
-          class TestError extends ORPCTaggedError()("Test") {}
+          class TestError extends ORPCTaggedError("Test") {}
           expect(TestError.code).toBe("TEST");
         });
 
         it("should split between words correctly", () => {
-          class TestTestError extends ORPCTaggedError()("TestTest") {}
+          class TestTestError extends ORPCTaggedError("TestTest") {}
           expect(TestTestError.code).toBe("TEST_TEST");
         });
 
         it("should handle tags with single uppercase followed by lowercase", () => {
-          class UnauthorizedError extends ORPCTaggedError()(
+          class UnauthorizedError extends ORPCTaggedError(
             "UnauthorizedError",
           ) {}
           expect(UnauthorizedError.code).toBe("UNAUTHORIZED_ERROR");
         });
 
         it("should handle mixed case patterns", () => {
-          class HTTPError extends ORPCTaggedError()("HTTPError") {}
+          class HTTPError extends ORPCTaggedError("HTTPError") {}
+          console.log(HTTPError);
           expect(HTTPError.code).toBe("HTTP_ERROR");
 
-          class XMLParserError extends ORPCTaggedError()("XMLParserError") {}
+          class XMLParserError extends ORPCTaggedError("XMLParserError") {}
           expect(XMLParserError.code).toBe("XML_PARSER_ERROR");
         });
       });

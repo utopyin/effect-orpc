@@ -51,7 +51,7 @@ const authedOs = os
   });
 
 // Define your services
-class UsersRepo extends Effect.Service<UsersRepo>()("UserService", {
+class UsersRepo extends Effect.Service<UsersRepo>()("UsersRepo", {
   accessors: true,
   sync: () => ({
     get: (id: number) => users.find((u) => u.id === id),

@@ -59,7 +59,7 @@ class UsersRepo extends Effect.Service<UsersRepo>()("UsersRepo", {
 }) {}
 
 // Special yieldable oRPC error class
-class UserNotFoundError extends ORPCTaggedError()("UserNotFoundError", {
+class UserNotFoundError extends ORPCTaggedError("UserNotFoundError", {
   status: 404,
 }) {}
 
@@ -170,27 +170,31 @@ const getUser = effectOs
 import { ORPCTaggedError } from "effect-orpc";
 
 // Basic tagged error - code defaults to 'USER_NOT_FOUND' (CONSTANT_CASE of tag)
-class UserNotFound extends ORPCTaggedError()("UserNotFound") {}
+class UserNotFound extends ORPCTaggedError("UserNotFound") {}
 
 // With explicit code
-class NotFound extends ORPCTaggedError()("NotFound", "NOT_FOUND") {}
+class NotFound extends ORPCTaggedError("NotFound", { code: "NOT_FOUND" }) {}
 
 // With default options (code defaults to 'VALIDATION_ERROR') (CONSTANT_CASE of tag)
-class ValidationError extends ORPCTaggedError()("ValidationError", {
+class ValidationError extends ORPCTaggedError("ValidationError", {
   status: 400,
   message: "Validation failed",
 }) {}
 
-// With explicit code and options
-class Forbidden extends ORPCTaggedError()("Forbidden", "FORBIDDEN", {
+// With all options
+class ForbiddenError extends ORPCTaggedError("ForbiddenError", {
+  code: "FORBIDDEN",
   status: 403,
   message: "Access denied",
+  schema: z.object({
+    reason: z.string(),
+  }),
 }) {}
 
 // With typed data using Standard Schema
-class UserNotFoundWithData extends ORPCTaggedError(
-  z.object({ userId: z.string() }),
-)("UserNotFoundWithData") {}
+class UserNotFoundWithData extends ORPCTaggedError("UserNotFoundWithData", {
+  schema: z.object({ userId: z.string() }),
+}) {}
 ```
 
 ## Traceable Spans
@@ -320,15 +324,16 @@ The result of calling `.effect()`. Extends standard oRPC `DecoratedProcedure` wi
 | `.callable(options?)`   | Make procedure directly invocable             |
 | `.actionable(options?)` | Make procedure compatible with server actions |
 
-### `ORPCTaggedError(schema?)(tag, codeOrOptions?, defaultOptions?)`
+### `ORPCTaggedError(tag, options?)`
 
 Factory function to create Effect-native tagged error classes.
-If no code is provided, it defaults to CONSTANT_CASE of the tag (e.g., `UserNotFoundError` → `USER_NOT_FOUND_ERROR`).
 
-- `schema` - Optional Standard Schema for the error's data payload (e.g., `z.object({ userId: z.string() })`)
-- `tag` - Unique tag for discriminated unions (used by Effect's `catchTag`)
-- `codeOrOptions` - Either an ORPCErrorCode string or `{ status?, message? }` options
-- `defaultOptions` - Default `{ status?, message? }` when code is provided explicitly
+The options is an optional object containing:
+
+- `schema?` - Optional Standard Schema for the error's data payload (e.g., `z.object({ userId: z.string() })`)
+- `code?` - Optional ORPCErrorCode, defaults to CONSTANT_CASE of the tag (e.g., `UserNotFoundError` → `USER_NOT_FOUND_ERROR`).
+- `status?` - Sets the default status of the error
+- `message` - Sets the default message of the error
 
 ## License
 

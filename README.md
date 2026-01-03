@@ -1,6 +1,6 @@
 # effect-orpc
 
-A type-safe integration between [oRPC](https://orpc.dev/) and [Effect](https://effect.website/), enabling Effect-native procedures with full service injection support.
+A type-safe integration between [oRPC](https://orpc.dev/) and [Effect](https://effect.website/), enabling Effect-native procedures with full service injection support, OpenTelemetry tracing support and typesafe Effect errors support.
 
 Inspired by [effect-trpc](https://github.com/mikearnaldi/effect-trpc).
 

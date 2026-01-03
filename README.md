@@ -65,7 +65,7 @@ class UserNotFoundError extends ORPCTaggedError()("UserNotFoundError", {
 
 // Create runtime with your services
 const runtime = ManagedRuntime.make(UsersRepo.Default);
-// Create Effect-aware oRPC builder from an other (optional) base oRPC builder
+// Create Effect-aware oRPC builder from an other (optional) base oRPC builder and provide tagged errors
 const effectOs = makeEffectORPC(runtime, authedOs).errors({
   UserNotFoundError,
 });

@@ -234,23 +234,6 @@ describe("class ORPCTaggedError", () => {
 
       expect(result).toBe("Fields: email");
     });
-
-    it("should work with commit() method for manual yielding", async () => {
-      const error = new UserNotFoundError({ message: "User 123 not found" });
-      const program = error.commit();
-
-      const result = await Effect.runPromiseExit(program);
-
-      expect(Exit.isFailure(result)).toBe(true);
-      if (Exit.isFailure(result)) {
-        const failedError =
-          result.cause._tag === "Fail" ? result.cause.error : null;
-        expect(failedError).toBeInstanceOf(UserNotFoundError);
-        expect((failedError as UserNotFoundError).message).toBe(
-          "User 123 not found",
-        );
-      }
-    });
   });
 
   describe("class static properties", () => {

@@ -13,7 +13,6 @@ import type { ORPCErrorConstructorMap } from "@orpc/server";
 import type { MaybeOptionalOptions } from "@orpc/shared";
 import type { Pipeable } from "effect";
 import type * as Cause from "effect/Cause";
-import type * as Effect from "effect/Effect";
 
 import {
   fallbackORPCErrorMessage,

@@ -47,9 +47,9 @@ describe("effectBuilder", () => {
   });
 
   it(".errors", () => {
-    class BadGatewayError extends ORPCTaggedError(
-      z.object({ why: z.string() }),
-    )("BadGatewayError") {}
+    class BadGatewayError extends ORPCTaggedError("BadGatewayError", {
+      schema: z.object({ why: z.string() }),
+    }) {}
     const errors = { BadGatewayError };
 
     const applied = builder.errors(errors);

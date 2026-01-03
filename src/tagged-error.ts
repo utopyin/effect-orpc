@@ -12,7 +12,6 @@ import type {
 import type { ORPCErrorConstructorMap } from "@orpc/server";
 import type { MaybeOptionalOptions } from "@orpc/shared";
 import type { Pipeable } from "effect";
-import type * as Cause from "effect/Cause";
 
 import {
   fallbackORPCErrorMessage,
@@ -21,6 +20,7 @@ import {
   ORPCError,
 } from "@orpc/client";
 import { resolveMaybeOptionalOptions } from "@orpc/shared";
+import * as Cause from "effect/Cause";
 import * as Data from "effect/Data";
 
 import type { EffectErrorMapToErrorMap } from "./types";
@@ -129,11 +129,11 @@ export function isORPCTaggedError(
  * Converts a PascalCase or camelCase string to CONSTANT_CASE.
  * e.g., "UserNotFoundError" -> "USER_NOT_FOUND_ERROR"
  */
-function toConstantCase(str: string): string {
+function toConstantCase<T extends string>(str: T): ToConstantCase<T> {
   return str
     .replace(/([a-z])([A-Z])/g, "$1_$2")
     .replace(/([A-Z])([A-Z][a-z])/g, "$1_$2")
-    .toUpperCase();
+    .toUpperCase() as ToConstantCase<T>;
 }
 /**
  * Checks if a character is an uppercase letter (A-Z)
@@ -247,137 +247,94 @@ export type TagToCode<TTag extends string> = ToConstantCase<TTag>;
  * ) {}
  * ```
  */
-/**
- * Return type for the factory function with overloads
- */
-interface ORPCTaggedErrorFactory<TSchema extends AnySchema = AnySchema> {
-  // Overload 1: tag only (code defaults to CONSTANT_CASE of tag)
-  <TTag extends string>(
-    tag: TTag,
-  ): ORPCTaggedErrorClass<TTag, TagToCode<TTag>, TSchema>;
+export function ORPCTaggedError<
+  TTag extends string,
+  TSchema extends AnySchema = AnySchema,
+  TCode extends ORPCErrorCode = ToConstantCase<TTag>,
+>(
+  tag: TTag,
+  props?: {
+    schema?: TSchema;
+    status?: number;
+    message?: string;
+    code?: TCode;
+  },
+): ORPCTaggedErrorClass<TTag, TCode, TSchema> {
+  const code: TCode = props?.code ?? (toConstantCase(tag) as any);
+  class ORPCTaggedErrorBase
+    extends Data.TaggedError(tag)
+    implements ORPCTaggedErrorInstance<TTag, TCode, TSchema>
+  {
+    readonly status: number;
+    readonly defined: boolean;
+    readonly data: InferSchemaOutput<TSchema>;
+    readonly code: TCode = code;
+    readonly schema = props?.schema as TSchema;
+    readonly [ORPCErrorSymbol]: ORPCError<TCode, InferSchemaOutput<TSchema>>;
 
-  // Overload 2: tag + options (code defaults to CONSTANT_CASE of tag)
-  <TTag extends string>(
-    tag: TTag,
-    options: { status?: number; message?: string },
-  ): ORPCTaggedErrorClass<TTag, TagToCode<TTag>, TSchema>;
+    constructor(
+      ...rest: MaybeOptionalOptions<
+        ORPCTaggedErrorOptions<InferSchemaOutput<TSchema>>
+      >
+    ) {
+      super();
 
-  // Overload 3: tag + explicit code
-  <TTag extends string, TCode extends ORPCErrorCode>(
-    tag: TTag,
-    code: TCode,
-    defaultOptions?: { status?: number; message?: string },
-  ): ORPCTaggedErrorClass<TTag, TCode, TSchema>;
-}
+      const opts = resolveMaybeOptionalOptions(rest);
+      const status = opts.status ?? props?.status;
 
-export function ORPCTaggedError<TSchema extends AnySchema = AnySchema>(
-  schema?: TSchema,
-) {
-  const factory = <TTag extends string, TCode extends ORPCErrorCode>(
-    tag: TTag,
-    codeOrOptions?: TCode | { status?: number; message?: string },
-    defaultOptions?: { status?: number; message?: string },
-  ): ORPCTaggedErrorClass<TTag, TCode, TSchema> => {
-    // Determine if second arg is code or options
-    const isCodeProvided = typeof codeOrOptions === "string";
-    const code = (
-      isCodeProvided ? codeOrOptions : toConstantCase(tag)
-    ) as TCode;
-    const options = isCodeProvided ? defaultOptions : codeOrOptions;
-
-    const defaultStatus = options?.status;
-    const defaultMessage = options?.message;
-
-    // Use Effect's TaggedError as the base - this handles all Effect internals
-    // (YieldableError, type symbols, Symbol.iterator, pipe(), etc.)
-    const BaseTaggedError = Data.TaggedError(tag) as unknown as new (args: {
-      message?: string;
-      cause?: unknown;
-      code: TCode;
-      status: number;
-      data: InferSchemaOutput<TSchema>;
-      defined: boolean;
-    }) => Cause.YieldableError & {
-      readonly _tag: TTag;
-      readonly code: TCode;
-      readonly status: number;
-      readonly data: InferSchemaOutput<TSchema>;
-      readonly defined: boolean;
-    };
-
-    class ORPCTaggedErrorBase extends BaseTaggedError {
-      static readonly schema = schema;
-      static readonly _tag = tag;
-      static readonly code = code;
-
-      readonly [ORPCErrorSymbol]: ORPCError<TCode, InferSchemaOutput<TSchema>>;
-
-      constructor(
-        ...rest: MaybeOptionalOptions<
-          ORPCTaggedErrorOptions<InferSchemaOutput<TSchema>>
-        >
-      ) {
-        const opts = resolveMaybeOptionalOptions(rest);
-        const status = opts.status ?? defaultStatus;
-        const inputMessage = opts.message ?? defaultMessage;
-
-        if (status !== undefined && !isORPCErrorStatus(status)) {
-          throw new globalThis.Error(
-            "[ORPCTaggedError] Invalid error status code.",
-          );
-        }
-
-        const finalStatus = fallbackORPCErrorStatus(code, status);
-        const finalMessage = fallbackORPCErrorMessage(code, inputMessage);
-
-        const data = opts.data as InferSchemaOutput<TSchema>;
-        // Pass to Effect's TaggedError - it spreads these onto the instance
-        super({
-          message: finalMessage,
-          cause: opts.cause,
-          code,
-          status: finalStatus,
-          data,
-          defined: opts.defined ?? true,
-        });
-
-        // Create the underlying ORPCError for interop
-        this[ORPCErrorSymbol] = new ORPCError<
-          TCode,
-          InferSchemaOutput<TSchema>
-        >(code, {
-          status: finalStatus,
-          message: finalMessage,
-          data,
-          defined: this.defined,
-          cause: opts.cause,
-        });
+      if (status !== undefined && !isORPCErrorStatus(status)) {
+        throw new globalThis.Error(
+          "[ORPCTaggedError] Invalid error status code.",
+        );
       }
 
-      /**
-       * Converts this error to a plain ORPCError.
-       * Useful when you need to return from an oRPC handler.
-       */
-      toORPCError(): ORPCError<TCode, TSchema> {
-        return this[ORPCErrorSymbol];
-      }
+      this.status = fallbackORPCErrorStatus(code, status);
+      this.defined = opts.defined ?? true;
+      this.data = opts.data as InferSchemaOutput<TSchema>;
+      this.message = fallbackORPCErrorMessage(
+        this.code,
+        opts.message ?? props?.message,
+      );
+      this.cause = opts.cause;
 
-      override toJSON(): ORPCErrorJSON<TCode, TSchema> & { _tag: TTag } {
-        return {
-          _tag: this._tag,
-          defined: this.defined,
-          code: this.code,
+      this[ORPCErrorSymbol] = new ORPCError<TCode, InferSchemaOutput<TSchema>>(
+        this.code,
+        {
           status: this.status,
           message: this.message,
           data: this.data,
-        };
-      }
+          defined: this.defined,
+          cause: this.cause,
+        },
+      );
     }
 
-    return ORPCTaggedErrorBase as any;
-  };
+    /**
+     * Converts this error to a plain ORPCError.
+     * Useful when you need to return from an oRPC handler.
+     */
+    toORPCError(): ORPCError<TCode, InferSchemaOutput<TSchema>> {
+      return this[ORPCErrorSymbol];
+    }
 
-  return factory as ORPCTaggedErrorFactory<TSchema>;
+    override toJSON(): ORPCErrorJSON<TCode, InferSchemaOutput<TSchema>> & {
+      _tag: TTag;
+    } {
+      return {
+        _tag: this._tag,
+        defined: this[ORPCErrorSymbol].defined,
+        code: this[ORPCErrorSymbol].code,
+        status: this[ORPCErrorSymbol].status,
+        message: this[ORPCErrorSymbol].message,
+        data: this[ORPCErrorSymbol].data,
+      };
+    }
+  }
+
+  return Object.assign(ORPCTaggedErrorBase, {
+    _tag: tag,
+    code,
+  } as const);
 }
 
 /**
@@ -545,8 +502,6 @@ export function effectErrorMapToErrorMap<T extends EffectErrorMap>(
 
     if (isORPCTaggedErrorClass(ClassOrErrorItem)) {
       const classInstance = new ClassOrErrorItem();
-      // For tagged errors, we create a minimal entry
-      // The actual validation will be handled by the tagged error class
       result[classInstance.code] = {
         status: classInstance.status,
         message: classInstance.message,

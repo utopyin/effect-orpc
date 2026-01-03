@@ -18,17 +18,19 @@ import {
   ORPCTaggedError,
 } from "../tagged-error";
 
-class UserNotFoundError extends ORPCTaggedError(
-  z.object({ userId: z.string() }),
-)("UserNotFoundError") {}
+const userNotFoundSchema = z.object({ userId: z.string() });
+class UserNotFoundError extends ORPCTaggedError("UserNotFoundError", {
+  schema: userNotFoundSchema,
+}) {}
 
-class ValidationError extends ORPCTaggedError(
-  z.object({ fields: z.array(z.string()) }),
-)("ValidationError", "BAD_REQUEST", { message: "Validation failed" }) {}
-class PermissionDenied extends ORPCTaggedError()(
-  "PermissionDenied",
-  "FORBIDDEN",
-) {}
+class ValidationError extends ORPCTaggedError("ValidationError", {
+  schema: z.object({ fields: z.array(z.string()) }),
+  code: "BAD_REQUEST",
+  message: "Validation failed",
+}) {}
+class PermissionDenied extends ORPCTaggedError("PermissionDenied", {
+  code: "FORBIDDEN",
+}) {}
 
 describe("effectErrorMap types", () => {
   it("should accept both traditional and tagged error formats", () => {
@@ -159,7 +161,7 @@ describe("effectErrorMapToErrorMap", () => {
       message: "Bad request",
     });
     expect(errorMap.USER_NOT_FOUND_ERROR).toEqual({
-      data: undefined,
+      data: userNotFoundSchema,
       message: "USER_NOT_FOUND_ERROR",
       status: 500,
     });

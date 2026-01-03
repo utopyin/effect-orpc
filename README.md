@@ -23,7 +23,7 @@ pnpm add effect-orpc
 bun add effect-orpc
 ```
 
-## Demo of the features
+## Demo
 
 ```ts
 import { os } from "@orpc/server";

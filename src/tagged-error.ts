@@ -514,13 +514,3 @@ export function effectErrorMapToErrorMap<T extends EffectErrorMap>(
 
   return result as ErrorMap & EffectErrorMapToErrorMap<T>;
 }
-
-export function mergeAnyErrorMaps<
-  T1 extends EffectErrorMap,
-  T2 extends EffectErrorMap,
->(map1: T1, map2: T2): EffectErrorMapToErrorMap<T1 & T2> {
-  return {
-    ...map1,
-    ...map2,
-  } as EffectErrorMapToErrorMap<T1 & T2>;
-}

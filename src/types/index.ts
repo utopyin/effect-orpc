@@ -147,7 +147,17 @@ export type EffectProcedureHandler<
 >;
 
 export type EffectErrorMapToErrorMap<T extends EffectErrorMap> = {
-  [K in keyof T]: K extends ORPCErrorCode
+  [K in keyof T as T[K] extends ErrorMapItem<AnySchema>
+    ? K extends ORPCErrorCode
+      ? K
+      : never
+    : T[K] extends {
+          new (...args: any[]): ORPCTaggedErrorInstance<any, any, any>;
+        }
+      ? T[K] extends { readonly code: infer TCode extends ORPCErrorCode }
+        ? TCode
+        : never
+      : never]: K extends ORPCErrorCode
     ? T[K] extends ErrorMapItem<AnySchema>
       ? T[K]
       : T[K] extends {

@@ -9,6 +9,7 @@ import { makeEffectORPC } from "effect-orpc";
 import { withFiberContext } from "effect-orpc/node";
 import { Hono } from "hono";
 import { requestId } from "hono/request-id";
+import * as z from "zod";
 
 import { runtime } from "./runtime";
 import { OrderService } from "./services/order";
@@ -38,13 +39,27 @@ app.use("/*", async (c, next) => {
 const o = makeEffectORPC(runtime, os);
 
 const router = {
-  orders: o.route({ path: "/orders", method: "GET" }).effect(function* () {
-    yield* Effect.logInfo("Handler: GET /orders - listing all orders");
-    return yield* OrderService.listOrders();
-  }),
-  test: o.route({ path: "/test", method: "GET" }).effect(function* () {
-    return "ok";
-  }),
+  orders: o
+    .route({ path: "/orders", method: "GET" })
+    .output(
+      z.array(
+        z.object({
+          id: z.string(),
+          items: z.array(z.string()),
+          status: z.string(),
+        }),
+      ),
+    )
+    .effect(function* () {
+      yield* Effect.logInfo("Handler: GET /orders - listing all orders");
+      return yield* OrderService.listOrders();
+    }),
+  test: o
+    .route({ path: "/test", method: "GET" })
+    .output(z.string())
+    .effect(function* () {
+      return "ok";
+    }),
 };
 
 const openAPIHandler = new OpenAPIHandler(router, {

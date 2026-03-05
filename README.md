@@ -89,46 +89,6 @@ export const router = {
 export type Router = typeof router;
 ```
 
-## Request-Scoped Fiber Context
-
-If you run `effect-orpc` inside a framework such as Hono, the handler executes
-through the runtime boundary and will not automatically inherit request-local
-`FiberRef` state from outer middleware. Import `makeEffectORPC` from the main
-package, and wrap the framework continuation with `withFiberContext` from
-`effect-orpc/node` to preserve request-scoped logs, tracing annotations, and
-other fiber-local state.
-
-```ts
-import { Hono } from "hono";
-import { Effect, ManagedRuntime } from "effect";
-import { makeEffectORPC } from "effect-orpc";
-import { withFiberContext } from "effect-orpc/node";
-
-const runtime = ManagedRuntime.make(AppLive);
-const effectOs = makeEffectORPC(runtime);
-const app = new Hono();
-
-app.use("*", async (c, next) => {
-  await Effect.runPromise(
-    Effect.gen(function* () {
-      yield* Effect.annotateLogsScoped({
-        requestId: c.get("requestId"),
-      });
-
-      yield* withFiberContext(() => next());
-    }),
-  );
-});
-```
-
-The reason for the separate `/node` entrypoint is that `withFiberContext` relies
-on Node/Bun's `AsyncLocalStorage` from `node:async_hooks` to carry Effect
-`FiberRef` state across framework async boundaries. The main package stays
-runtime-agnostic.
-
-If you do not need framework-to-handler fiber propagation, you do not need the
-`/node` entrypoint at all.
-
 ## Type Safety
 
 The wrapper enforces that Effect procedures only use services provided by the `ManagedRuntime`. If you try to use a service that isn't in the runtime, you'll get a compile-time error:
@@ -308,6 +268,46 @@ MyCustomError: Something went wrong
     at <anonymous> (/app/src/procedures.ts:42:28)
     at users.getById (/app/src/procedures.ts:41:35)
 ```
+
+## Request-Scoped Fiber Context
+
+If you run `effect-orpc` inside a framework such as Hono, the handler executes
+through the runtime boundary and will not automatically inherit request-local
+`FiberRef` state from outer middleware. Import `makeEffectORPC` from the main
+package, and wrap the framework continuation with `withFiberContext` from
+`effect-orpc/node` to preserve request-scoped logs, tracing annotations, and
+other fiber-local state.
+
+```ts
+import { Hono } from "hono";
+import { Effect, ManagedRuntime } from "effect";
+import { makeEffectORPC } from "effect-orpc";
+import { withFiberContext } from "effect-orpc/node";
+
+const runtime = ManagedRuntime.make(AppLive);
+const effectOs = makeEffectORPC(runtime);
+const app = new Hono();
+
+app.use("*", async (c, next) => {
+  await Effect.runPromise(
+    Effect.gen(function* () {
+      yield* Effect.annotateLogsScoped({
+        requestId: c.get("requestId"),
+      });
+
+      yield* withFiberContext(() => next());
+    }),
+  );
+});
+```
+
+The reason for the separate `/node` entrypoint is that `withFiberContext` relies
+on Node/Bun's `AsyncLocalStorage` from `node:async_hooks` to carry Effect
+`FiberRef` state across framework async boundaries. The main package stays
+runtime-agnostic.
+
+If you do not need framework-to-handler fiber propagation, you do not need the
+`/node` entrypoint at all.
 
 ## API Reference
 

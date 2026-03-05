@@ -51,6 +51,7 @@ import type {
   EffectBuilderDef,
   EffectErrorMapToErrorMap,
   EffectProcedureBuilderWithInput,
+  EffectProcedureBuilderWithOutput,
   EffectProcedureHandler,
   EffectRouterBuilder,
   EnhancedEffectRouter,
@@ -484,7 +485,7 @@ export class EffectBuilder<
    */
   output<USchema extends AnySchema>(
     schema: USchema,
-  ): EffectBuilder<
+  ): EffectProcedureBuilderWithOutput<
     TInitialContext,
     TCurrentContext,
     TInputSchema,
@@ -494,6 +495,8 @@ export class EffectBuilder<
     TRequirementsProvided,
     TRuntimeError
   > {
+    // We cast to any because EffectProcedureBuilderWithOutput narrows
+    // handler/effect output typing based on the declared output schema.
     return new EffectBuilder({
       ...this["~effect"],
       outputSchema: schema,
@@ -502,7 +505,7 @@ export class EffectBuilder<
           "initialOutputValidationIndex",
           this["~effect"].config.initialOutputValidationIndex,
         ) + this["~effect"].middlewares.length,
-    });
+    }) as any;
   }
 
   /**

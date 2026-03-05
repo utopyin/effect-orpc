@@ -910,11 +910,11 @@ export interface EffectProcedureBuilderWithOutput<
     TRuntimeError
   >;
 
-  "effect"<UFuncOutput>(
+  "effect"(
     effectFn: EffectProcedureHandler<
       TCurrentContext,
       InferSchemaOutput<TInputSchema>,
-      UFuncOutput,
+      InferSchemaInput<TOutputSchema>,
       TEffectErrorMap,
       TRequirementsProvided,
       TMeta
@@ -923,7 +923,7 @@ export interface EffectProcedureBuilderWithOutput<
     TInitialContext,
     TCurrentContext,
     TInputSchema,
-    Schema<UFuncOutput, UFuncOutput>,
+    TOutputSchema,
     TEffectErrorMap,
     TMeta,
     TRequirementsProvided,
@@ -1123,11 +1123,11 @@ export interface EffectProcedureBuilderWithInputOutput<
     TRuntimeError
   >;
 
-  "effect"<UFuncOutput>(
+  "effect"(
     effectFn: EffectProcedureHandler<
       TCurrentContext,
       InferSchemaOutput<TInputSchema>,
-      UFuncOutput,
+      InferSchemaInput<TOutputSchema>,
       TEffectErrorMap,
       TRequirementsProvided,
       TMeta
@@ -1136,7 +1136,7 @@ export interface EffectProcedureBuilderWithInputOutput<
     TInitialContext,
     TCurrentContext,
     TInputSchema,
-    Schema<UFuncOutput, UFuncOutput>,
+    TOutputSchema,
     TEffectErrorMap,
     TMeta,
     TRequirementsProvided,

@@ -1,7 +1,9 @@
+import type { InferSchemaOutput } from "@orpc/contract";
+
 import { isContractProcedure } from "@orpc/contract";
 import { os } from "@orpc/server";
 import { Effect, Layer, ManagedRuntime } from "effect";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 import z from "zod";
 
 import { EffectBuilder, makeEffectORPC } from "../effect-builder";
@@ -213,7 +215,7 @@ describe("makeEffectORPC factory", () => {
   it("supports Effect.fn generator syntax", async () => {
     const effectBuilder = makeEffectORPC(runtime);
 
-    // oxlint-disable-next-line require-yield
+    //
     const procedure = effectBuilder.effect(function* () {
       const a = yield* Effect.succeed(1);
       const b = yield* Effect.succeed(2);
@@ -284,7 +286,6 @@ describe("effect with services", () => {
     const serviceRuntime = ManagedRuntime.make(CounterLive);
     const effectBuilder = makeEffectORPC(serviceRuntime);
 
-    // oxlint-disable-next-line require-yield
     const procedure = effectBuilder.input(z.number()).effect(function* ({
       input,
     }) {
@@ -515,5 +516,33 @@ describe("default tracing (without .traced())", () => {
 
     const withInput = effectBuilder.input(z.string());
     expect(withInput["~effect"].spanConfig).toBeUndefined();
+  });
+
+  it("enforces the declared output schema for effect handlers", () => {
+    const declaredOutputSchema = z.object({ name: z.string() });
+
+    makeEffectORPC(runtime)
+      .input(z.string())
+      .output(declaredOutputSchema)
+      .effect(
+        // @ts-expect-error input().output() should constrain the effect return type
+        // oxlint-disable-next-line require-yield
+        function* () {
+          return { count: 1 };
+        },
+      );
+
+    const procedure = makeEffectORPC(runtime)
+      .output(declaredOutputSchema)
+      // @ts-expect-error output() should constrain the effect return type
+      // oxlint-disable-next-line require-yield
+      .effect(function* () {
+        return { count: 1 };
+      });
+
+    type ProcedureOutput = InferSchemaOutput<
+      NonNullable<(typeof procedure)["~orpc"]["outputSchema"]>
+    >;
+    expectTypeOf<ProcedureOutput>().toEqualTypeOf<{ name: string }>();
   });
 });

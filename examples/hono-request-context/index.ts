@@ -53,6 +53,7 @@ const openAPIHandler = new OpenAPIHandler(router, {
   plugins: [
     new CORSPlugin(),
     new OpenAPIReferencePlugin({
+      docsPath: "/docs",
       schemaConverters: [new ZodToJsonSchemaConverter()],
     }),
   ],

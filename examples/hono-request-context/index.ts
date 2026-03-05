@@ -4,7 +4,7 @@ import { onError, os } from "@orpc/server";
 import { CORSPlugin } from "@orpc/server/plugins";
 import { ZodToJsonSchemaConverter } from "@orpc/zod/zod4";
 import { serve } from "bun";
-import { type Effect as EffectType, Effect, pipe } from "effect";
+import { Effect, pipe } from "effect";
 import { makeEffectORPC } from "effect-orpc";
 import { withFiberContext } from "effect-orpc/node";
 import { Hono } from "hono";
@@ -32,9 +32,7 @@ app.use("/*", async (c, next) => {
     yield* Effect.logInfo(`[Response] ${method} ${path} (${c.res.status})`);
   }).pipe(Effect.scoped, Effect.withSpan(`${method} ${path}`));
 
-  await runtime.runPromise(
-    requestEffect as EffectType.Effect<void, unknown, never>,
-  );
+  await runtime.runPromise(requestEffect);
 });
 
 const o = makeEffectORPC(runtime, os);

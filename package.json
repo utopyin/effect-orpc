@@ -38,9 +38,13 @@
     "format:check": "oxfmt --check",
     "check": "bun run format:check && bun run lint:check && bun run type:check",
     "format": "oxfmt",
-    "test": "vitest ./src/tests"
+    "test": "vitest ./src/tests",
+    "changeset": "changeset",
+    "version-packages": "changeset version",
+    "release": "bun run build && changeset publish"
   },
   "devDependencies": {
+    "@changesets/cli": "^2.30.0",
     "@types/bun": "latest",
     "effect": "^3.18.4",
     "oxfmt": "^0.21.0",

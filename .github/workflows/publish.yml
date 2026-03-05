@@ -1,21 +1,19 @@
-name: Publish
+name: Release
 
 on:
-  release:
-    types: [published]
-  workflow_dispatch:
-    inputs:
-      version:
-        description: "Version to publish (e.g., 1.0.0)"
-        required: true
-        type: string
+  push:
+    branches:
+      - main
+
+concurrency: ${{ github.workflow }}-${{ github.ref }}
 
 jobs:
-  publish:
+  release:
     runs-on: ubuntu-latest
     permissions:
       contents: write
       id-token: write
+      pull-requests: write
 
     steps:
       - name: Checkout code
@@ -26,7 +24,7 @@ jobs:
         with:
           bun-version: latest
 
-      - name: Setup Node (for npm publish with OIDC)
+      - name: Setup Node (for npm publish)
         uses: actions/setup-node@v4
         with:
           node-version: "24"
@@ -41,9 +39,11 @@ jobs:
       - name: Run tests
         run: bun run test
 
-      - name: Build
-        run: bun run build
-
-      - name: Publish to NPM
-        if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
-        run: npm publish --access public
+      - name: Create release pull request or publish
+        id: changesets
+        uses: changesets/action@v1
+        with:
+          version: bun run version-packages
+          publish: bun run release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

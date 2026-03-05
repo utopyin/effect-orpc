@@ -65,6 +65,7 @@ import type {
 
 import { enhanceEffectRouter } from "./effect-enhance-router";
 import { EffectDecoratedProcedure } from "./effect-procedure";
+import { getCurrentFiberRefs } from "./fiber-context-bridge";
 import {
   createEffectErrorConstructorMap,
   effectErrorMapToErrorMap,
@@ -627,7 +628,13 @@ export class EffectBuilder<
         const tracedEffect = Effect.withSpan(resolver(effectOpts), spanName, {
           captureStackTrace,
         });
-        const exit = await runtime.runPromiseExit(tracedEffect, {
+        const parentFiberRefs = getCurrentFiberRefs();
+        const effectWithRefs = parentFiberRefs
+          ? Effect.setFiberRefs(parentFiberRefs).pipe(
+              Effect.andThen(tracedEffect),
+            )
+          : tracedEffect;
+        const exit = await runtime.runPromiseExit(effectWithRefs, {
           signal: opts.signal,
         });
 

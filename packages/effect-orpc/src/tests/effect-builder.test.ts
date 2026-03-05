@@ -2,12 +2,13 @@ import type { InferSchemaOutput } from "@orpc/contract";
 
 import { isContractProcedure } from "@orpc/contract";
 import { os } from "@orpc/server";
-import { Effect, Layer, ManagedRuntime } from "effect";
+import { Effect, FiberRef, Layer, ManagedRuntime } from "effect";
 import { beforeEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 import z from "zod";
 
 import { EffectBuilder, makeEffectORPC } from "../effect-builder";
 import { EffectDecoratedProcedure } from "../effect-procedure";
+import { withFiberContext } from "../node";
 import { effectErrorMapToErrorMap, ORPCTaggedError } from "../tagged-error";
 import {
   baseErrorMap,
@@ -160,6 +161,58 @@ describe("effectBuilder", () => {
 
     expect(result).toEqual({ output: "processed-test-input" });
     expect(effectFn).toHaveBeenCalledTimes(1);
+  });
+
+  it(".effect does not inherit parent FiberRefs by default", async () => {
+    const requestIdRef = FiberRef.unsafeMake("missing");
+    const applied = builder.effect(function* () {
+      return yield* FiberRef.get(requestIdRef);
+    });
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* FiberRef.set(requestIdRef, "req-123");
+        return yield* Effect.promise(() =>
+          applied["~effect"].handler({
+            context: {},
+            input: undefined,
+            path: ["test"],
+            procedure: applied as any,
+            signal: undefined,
+            lastEventId: undefined,
+            errors: {},
+          }),
+        );
+      }),
+    );
+
+    expect(result).toBe("missing");
+  });
+
+  it(".effect inherits parent FiberRefs with withFiberContext", async () => {
+    const requestIdRef = FiberRef.unsafeMake("missing");
+    const applied = builder.effect(function* () {
+      return yield* FiberRef.get(requestIdRef);
+    });
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* FiberRef.set(requestIdRef, "req-123");
+        return yield* withFiberContext(() =>
+          applied["~effect"].handler({
+            context: {},
+            input: undefined,
+            path: ["test"],
+            procedure: applied as any,
+            signal: undefined,
+            lastEventId: undefined,
+            errors: {},
+          }),
+        );
+      }),
+    );
+
+    expect(result).toBe("req-123");
   });
 });
 

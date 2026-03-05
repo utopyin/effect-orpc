@@ -23,6 +23,14 @@ pnpm add effect-orpc
 bun add effect-orpc
 ```
 
+`makeEffectORPC` stays on the main `effect-orpc` entrypoint. Only import
+`withFiberContext` from `effect-orpc/node`.
+
+The reason for the separate `/node` entrypoint is that `withFiberContext` relies
+on Node/Bun's `AsyncLocalStorage` from `node:async_hooks` to carry Effect
+`FiberRef` state across framework async boundaries. The main package stays
+runtime-agnostic.
+
 Runnable demos live in the repository's `examples/` directory.
 
 ## Demo
@@ -120,11 +128,6 @@ app.use("*", async (c, next) => {
   );
 });
 ```
-
-The reason for the separate `/node` entrypoint is that `withFiberContext` relies
-on Node/Bun's `AsyncLocalStorage` from `node:async_hooks` to carry Effect
-`FiberRef` state across framework async boundaries. The main package stays
-runtime-agnostic.
 
 If you do not need framework-to-handler fiber propagation, you do not need the
 `/node` entrypoint at all.

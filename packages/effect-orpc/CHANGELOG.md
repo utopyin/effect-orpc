@@ -1,5 +1,11 @@
 # effect-orpc
 
+## 0.1.1
+
+### Patch Changes
+
+- 16a7fe8: Add documentation on new `withFiberContext`
+
 ## 0.1.0
 
 ### Minor Changes

@@ -273,10 +273,11 @@ MyCustomError: Something went wrong
 
 If you run `effect-orpc` inside a framework such as Hono, the handler executes
 through the runtime boundary and will not automatically inherit request-local
-`FiberRef` state from outer middleware. Import `makeEffectORPC` from the main
-package, and wrap the framework continuation with `withFiberContext` from
-`effect-orpc/node` to preserve request-scoped logs, tracing annotations, and
-other fiber-local state.
+`FiberRef` state from outer middleware.
+
+To preserve request-scoped logs, tracing annotations, and
+other fiber-local state, wrap the framework continuation with `withFiberContext` from
+`effect-orpc/node`.
 
 ```ts
 import { Hono } from "hono";

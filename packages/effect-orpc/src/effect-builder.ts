@@ -20,7 +20,6 @@ import type {
   BuilderConfig,
   BuilderDef,
   Context,
-  IntersectPick,
   Lazy,
   MapInputMiddleware,
   MergedCurrentContext,
@@ -37,6 +36,7 @@ import {
   fallbackConfig,
   lazy,
 } from "@orpc/server";
+import type { IntersectPick } from "@orpc/shared";
 import {
   Cause,
   Effect,

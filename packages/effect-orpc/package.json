@@ -36,7 +36,7 @@
     }
   },
   "scripts": {
-    "build": "tsup",
+    "build": "tsup && bun run sync:readme",
     "build:watch": "bun run build --watch",
     "type:check": "tsc -b",
     "lint:check": "oxlint",
@@ -44,7 +44,7 @@
     "check": "bun run format:check && bun run lint:check && bun run type:check",
     "format": "oxfmt",
     "test": "vitest ./src/tests",
-    "prepack": "bun ../../scripts/sync-package-readme.ts"
+    "sync:readme": "bun ../../scripts/sync-package-readme.ts"
   },
   "devDependencies": {
     "@types/bun": "latest",

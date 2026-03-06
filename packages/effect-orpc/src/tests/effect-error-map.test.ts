@@ -3,13 +3,12 @@ import { Effect, Layer, ManagedRuntime } from "effect";
 import { describe, expect, expectTypeOf, it } from "vitest";
 import { z } from "zod";
 
+import { makeEffectORPC } from "../effect-builder";
 import type {
   EffectErrorMap,
   EffectErrorMapToUnion,
   ORPCTaggedErrorInstance,
 } from "../tagged-error";
-
-import { makeEffectORPC } from "../effect-builder";
 import {
   createEffectErrorConstructorMap,
   effectErrorMapToErrorMap,

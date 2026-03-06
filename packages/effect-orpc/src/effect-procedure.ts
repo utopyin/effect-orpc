@@ -6,6 +6,7 @@ import type {
   Meta,
   Route,
 } from "@orpc/contract";
+import { mergeMeta, mergeRoute } from "@orpc/contract";
 import type {
   AnyMiddleware,
   Context,
@@ -18,9 +19,6 @@ import type {
   ProcedureClient,
   ProcedureDef,
 } from "@orpc/server";
-import type { IntersectPick, MaybeOptionalOptions } from "@orpc/shared";
-
-import { mergeMeta, mergeRoute } from "@orpc/contract";
 import {
   addMiddleware,
   createActionableClient,
@@ -28,15 +26,15 @@ import {
   decorateMiddleware,
   Procedure,
 } from "@orpc/server";
+import type { IntersectPick, MaybeOptionalOptions } from "@orpc/shared";
 
 import type {
   EffectErrorConstructorMap,
   EffectErrorMap,
   MergedEffectErrorMap,
 } from "./tagged-error";
-import type { EffectErrorMapToErrorMap, EffectProcedureDef } from "./types";
-
 import { effectErrorMapToErrorMap } from "./tagged-error";
+import type { EffectErrorMapToErrorMap, EffectProcedureDef } from "./types";
 
 export class EffectProcedure<
   TInitialContext extends Context,

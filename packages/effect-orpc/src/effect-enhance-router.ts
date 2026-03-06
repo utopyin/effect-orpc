@@ -1,5 +1,3 @@
-import type { ManagedRuntime } from "effect/ManagedRuntime";
-
 import {
   enhanceRoute,
   mergePrefix,
@@ -18,11 +16,11 @@ import {
   type Context,
   type Lazyable,
 } from "@orpc/server";
-
-import type { EffectErrorMapToErrorMap, EnhancedEffectRouter } from "./types";
+import type { ManagedRuntime } from "effect/ManagedRuntime";
 
 import { EffectProcedure } from "./effect-procedure";
 import { effectErrorMapToErrorMap, type EffectErrorMap } from "./tagged-error";
+import type { EffectErrorMapToErrorMap, EnhancedEffectRouter } from "./types";
 
 interface EnhanceEffectRouterOptions<
   TEffectErrorMap extends EffectErrorMap,

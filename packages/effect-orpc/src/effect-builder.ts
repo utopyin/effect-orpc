@@ -8,6 +8,13 @@ import type {
   Route,
   Schema,
 } from "@orpc/contract";
+import {
+  mergeMeta,
+  mergePrefix,
+  mergeRoute,
+  mergeTags,
+  ORPCError,
+} from "@orpc/contract";
 import type {
   AnyMiddleware,
   BuilderConfig,
@@ -22,16 +29,6 @@ import type {
   ProcedureHandlerOptions,
   Router,
 } from "@orpc/server";
-import type { IntersectPick } from "@orpc/shared";
-import type { ManagedRuntime } from "effect";
-
-import {
-  mergeMeta,
-  mergePrefix,
-  mergeRoute,
-  mergeTags,
-  ORPCError,
-} from "@orpc/contract";
 import {
   addMiddleware,
   Builder,
@@ -39,12 +36,22 @@ import {
   fallbackConfig,
   lazy,
 } from "@orpc/server";
+import type { IntersectPick } from "@orpc/shared";
+import type { ManagedRuntime } from "effect";
 import { Cause, Effect, Exit, FiberRefs } from "effect";
 
+import { enhanceEffectRouter } from "./effect-enhance-router";
+import { EffectDecoratedProcedure } from "./effect-procedure";
+import { getCurrentFiberRefs } from "./fiber-context-bridge";
 import type {
   EffectErrorConstructorMap,
   EffectErrorMap,
   MergedEffectErrorMap,
+} from "./tagged-error";
+import {
+  createEffectErrorConstructorMap,
+  effectErrorMapToErrorMap,
+  isORPCTaggedError,
 } from "./tagged-error";
 import type {
   AnyBuilderLike,
@@ -62,15 +69,6 @@ import type {
   InferBuilderMeta,
   InferBuilderOutputSchema,
 } from "./types";
-
-import { enhanceEffectRouter } from "./effect-enhance-router";
-import { EffectDecoratedProcedure } from "./effect-procedure";
-import { getCurrentFiberRefs } from "./fiber-context-bridge";
-import {
-  createEffectErrorConstructorMap,
-  effectErrorMapToErrorMap,
-  isORPCTaggedError,
-} from "./tagged-error";
 
 /**
  * Captures the stack trace at the call site for better error reporting in spans.

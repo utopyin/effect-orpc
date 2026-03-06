@@ -1,7 +1,7 @@
-import type { FiberRefs } from "effect";
-
-import { Effect } from "effect";
 import { AsyncLocalStorage } from "node:async_hooks";
+
+import type { FiberRefs } from "effect";
+import { Effect } from "effect";
 
 import {
   installFiberContextBridge,

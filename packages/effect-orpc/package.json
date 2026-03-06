@@ -43,7 +43,8 @@
     "format:check": "oxfmt --check",
     "check": "bun run format:check && bun run lint:check && bun run type:check",
     "format": "oxfmt",
-    "test": "vitest ./src/tests"
+    "test": "vitest ./src/tests",
+    "prepack": "bun ../../scripts/sync-package-readme.ts"
   },
   "devDependencies": {
     "@types/bun": "latest",

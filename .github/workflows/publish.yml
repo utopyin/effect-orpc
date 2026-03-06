@@ -10,6 +10,7 @@ concurrency: ${{ github.workflow }}-${{ github.ref }}
 jobs:
   release:
     runs-on: ubuntu-latest
+    if: ${{ github.repository == 'utopyin/effect-orpc' }}
     permissions:
       contents: write
       id-token: write

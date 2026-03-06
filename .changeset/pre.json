@@ -5,8 +5,8 @@
     "effect-orpc": "0.1.2"
   },
   "changesets": [
+    "dull-spiders-smash",
     "fluffy-times-shave",
-    "polite-plums-hammer",
     "silly-doodles-cover"
   ]
 }

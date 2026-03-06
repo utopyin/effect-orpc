@@ -8,7 +8,8 @@ It demonstrates:
 - Hono request middleware annotating logs with a request ID
 - `makeEffectORPC` imported from `effect-orpc`
 - `withFiberContext(() => next())` imported from `effect-orpc/node`
-- nested Effect services preserving the same request-scoped annotations
+- nested Effect services preserving the same request-scoped annotations and
+  references
 
 ## Run
 

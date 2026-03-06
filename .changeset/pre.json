@@ -5,6 +5,7 @@
     "effect-orpc": "0.1.2"
   },
   "changesets": [
-    "fluffy-times-shave"
+    "fluffy-times-shave",
+    "silly-doodles-cover"
   ]
 }

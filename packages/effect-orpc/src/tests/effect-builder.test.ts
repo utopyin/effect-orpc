@@ -214,6 +214,52 @@ describe("effectBuilder", () => {
 
     expect(result).toBe("req-123");
   });
+
+  it(".effect merges context FiberRefs with runtime FiberRefs, prioritizing context FiberRefs", async () => {
+    const requestIdRef = FiberRef.unsafeMake("missing");
+
+    class Counter extends Effect.Tag("Counter")<
+      Counter,
+      { increment: (n: number) => Effect.Effect<number> }
+    >() {}
+
+    const CounterLive = Layer.succeed(Counter, {
+      increment: (n: number) => Effect.succeed(n + 1),
+    });
+    const serviceRuntime = ManagedRuntime.make(CounterLive);
+    const effectBuilder = makeEffectORPC(serviceRuntime);
+    const procedure = effectBuilder.input(z.number()).effect(function* ({
+      input,
+    }) {
+      const requestId = yield* FiberRef.get(requestIdRef);
+      const value = yield* Counter.increment(input as number);
+
+      return { requestId, value };
+    });
+
+    try {
+      const result = await Effect.runPromise(
+        Effect.gen(function* () {
+          yield* FiberRef.set(requestIdRef, "req-123");
+          return yield* withFiberContext(() =>
+            procedure["~effect"].handler({
+              context: {},
+              input: 5,
+              path: ["test"],
+              procedure: procedure as any,
+              signal: undefined,
+              lastEventId: undefined,
+              errors: {},
+            }),
+          );
+        }),
+      );
+
+      expect(result).toEqual({ requestId: "req-123", value: 6 });
+    } finally {
+      await serviceRuntime.dispose();
+    }
+  });
 });
 
 describe("makeEffectORPC factory", () => {

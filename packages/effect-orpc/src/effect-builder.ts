@@ -39,7 +39,7 @@ import {
   fallbackConfig,
   lazy,
 } from "@orpc/server";
-import { Cause, Effect, Exit } from "effect";
+import { Cause, Effect, Exit, FiberRefs } from "effect";
 
 import type {
   EffectErrorConstructorMap,
@@ -630,8 +630,12 @@ export class EffectBuilder<
         });
         const parentFiberRefs = getCurrentFiberRefs();
         const effectWithRefs = parentFiberRefs
-          ? Effect.setFiberRefs(parentFiberRefs).pipe(
-              Effect.andThen(tracedEffect),
+          ? Effect.fiberIdWith((fiberId) =>
+              Effect.flatMap(Effect.getFiberRefs, (fiberRefs) =>
+                Effect.setFiberRefs(
+                  FiberRefs.joinAs(fiberRefs, fiberId, parentFiberRefs),
+                ).pipe(Effect.andThen(tracedEffect)),
+              ),
             )
           : tracedEffect;
         const exit = await runtime.runPromiseExit(effectWithRefs, {

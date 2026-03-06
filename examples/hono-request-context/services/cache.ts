@@ -22,9 +22,8 @@ export class CacheService extends Effect.Service<CacheService>()(
             }
 
             yield* Effect.logInfo(`Cache MISS: ${key}, fetching from DB`);
-            const result = yield* db.query(
-              `SELECT * FROM cache WHERE key = '${key}'`,
-            );
+            const result =
+              yield* db.query`SELECT * FROM cache WHERE key = '${key}'`;
             cache.set(key, result);
             return result;
           }).pipe(

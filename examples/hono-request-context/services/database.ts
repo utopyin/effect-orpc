@@ -4,7 +4,7 @@ export class DatabaseService extends Effect.Service<DatabaseService>()(
   "DatabaseService",
   {
     sync: () => ({
-      query: (sql: string) =>
+      query: (sql: TemplateStringsArray, ..._args: unknown[]) =>
         Effect.gen(function* () {
           yield* Effect.logInfo(`Executing SQL: ${sql}`);
           yield* Effect.sleep("10 millis");

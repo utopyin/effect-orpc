@@ -1,5 +1,12 @@
 # effect-orpc
 
+## 0.1.2
+
+### Patch Changes
+
+- 4dcdec0: Symlinked README.md to root's README
+- e802e5e: fix: Preserve runtime services when inheriting request fiber refs with `withFiberContext`.
+
 ## 0.1.1
 
 ### Patch Changes

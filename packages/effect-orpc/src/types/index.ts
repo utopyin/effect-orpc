@@ -132,7 +132,7 @@ export type EffectProcedureHandler<
     EffectErrorConstructorMap<TEffectErrorMap>,
     TMeta
   >,
-) => Effect.gen.Return<
+) => Effect.fn.Return<
   THandlerOutput,
   EffectErrorMapToUnion<TEffectErrorMap> | ORPCError<ORPCErrorCode, unknown>,
   TRequirementsProvided

@@ -52,7 +52,8 @@ const router = {
     )
     .effect(function* () {
       yield* Effect.logInfo("Handler: GET /orders - listing all orders");
-      return yield* OrderService.listOrders();
+      const orders = yield* OrderService;
+      return yield* orders.listOrders();
     }),
   test: o
     .route({ path: "/test", method: "GET" })

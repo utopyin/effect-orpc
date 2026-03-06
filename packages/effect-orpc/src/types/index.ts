@@ -24,7 +24,6 @@ import type {
 } from "@orpc/server";
 import type { Promisable } from "@orpc/shared";
 import type { Effect, ManagedRuntime } from "effect";
-import type { YieldWrap } from "effect/Utils";
 
 import type {
   EffectErrorConstructorMap,
@@ -133,17 +132,10 @@ export type EffectProcedureHandler<
     EffectErrorConstructorMap<TEffectErrorMap>,
     TMeta
   >,
-) => Generator<
-  YieldWrap<
-    Effect.Effect<
-      any,
-      | EffectErrorMapToUnion<TEffectErrorMap>
-      | ORPCError<ORPCErrorCode, unknown>,
-      TRequirementsProvided
-    >
-  >,
+) => Effect.fn.Return<
   THandlerOutput,
-  never
+  EffectErrorMapToUnion<TEffectErrorMap> | ORPCError<ORPCErrorCode, unknown>,
+  TRequirementsProvided
 >;
 
 export type EffectErrorMapToErrorMap<T extends EffectErrorMap> = {

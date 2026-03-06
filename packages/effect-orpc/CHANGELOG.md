@@ -1,5 +1,29 @@
 # effect-orpc
 
+## 1.0.0-effect-v4.3
+
+### Patch Changes
+
+- b1d95d7: Add README
+
+## 1.0.0-effect-v4.2
+
+### Patch Changes
+
+- ed5bc70: Sync readme from root to package so that it gets published on NPM
+
+## 1.0.0-effect-v4.1
+
+### Patch Changes
+
+- ac41539: docs: remove duplicate request-scoped context section
+
+## 1.0.0-effect-v4.0
+
+### Major Changes
+
+- 045df4a: migrate to effect-v4 (effect-smol)
+
 ## 0.1.4
 
 ### Patch Changes

@@ -14,7 +14,6 @@ import type {
   BuilderDef,
   Context,
   EnhanceRouterOptions,
-  IntersectPick,
   Lazy,
   Lazyable,
   MapInputMiddleware,
@@ -23,6 +22,7 @@ import type {
   Middleware,
   Router,
 } from "@orpc/server";
+import type { IntersectPick } from "@orpc/shared";
 
 import type {
   EffectBuilderDef,

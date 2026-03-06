@@ -37,7 +37,14 @@ import {
   fallbackConfig,
   lazy,
 } from "@orpc/server";
-import { Cause, Effect, Exit, ManagedRuntime, ServiceMap } from "effect";
+import {
+  Cause,
+  Effect,
+  Exit,
+  ManagedRuntime,
+  Result,
+  ServiceMap,
+} from "effect";
 
 import { enhanceEffectRouter } from "./effect-enhance-router";
 import { EffectDecoratedProcedure } from "./effect-procedure";
@@ -101,21 +108,13 @@ export function addSpanStackTrace(): () => string | undefined {
 function toORPCErrorFromCause(
   cause: Cause.Cause<unknown>,
 ): ORPCError<string, unknown> {
-  const reason = cause.reasons[0];
+  if (Cause.hasFails(cause)) {
+    const reason = Cause.findFail(cause);
+    if (Result.isFailure(reason)) {
+      return new ORPCError("INTERNAL_SERVER_ERROR");
+    }
 
-  if (reason === undefined) {
-    return new ORPCError("INTERNAL_SERVER_ERROR");
-  }
-
-  if (Cause.isDieReason(reason)) {
-    return new ORPCError("INTERNAL_SERVER_ERROR", {
-      cause: reason.defect,
-    });
-  }
-
-  if (Cause.isFailReason(reason)) {
-    const error = reason.error;
-
+    const error = reason.success.error;
     if (isORPCTaggedError(error)) {
       return error.toORPCError();
     }
@@ -128,9 +127,31 @@ function toORPCErrorFromCause(
     });
   }
 
-  return new ORPCError("INTERNAL_SERVER_ERROR", {
-    cause: new Error(`${reason.fiberId} Interrupted`),
-  });
+  if (Cause.hasDies(cause)) {
+    const reason = Cause.findDie(cause);
+    if (Result.isFailure(reason)) {
+      return new ORPCError("INTERNAL_SERVER_ERROR", {
+        cause: new Error(`Died by unknown reason`),
+      });
+    }
+    return new ORPCError("INTERNAL_SERVER_ERROR", {
+      cause: reason.success.defect,
+    });
+  }
+
+  if (Cause.hasInterrupts(cause)) {
+    const reason = Cause.findInterrupt(cause);
+    if (Result.isFailure(reason)) {
+      return new ORPCError("INTERNAL_SERVER_ERROR", {
+        cause: new Error(`Unknown fiber got interrupted`),
+      });
+    }
+    return new ORPCError("INTERNAL_SERVER_ERROR", {
+      cause: new Error(`${reason.success.fiberId} got interrupted`),
+    });
+  }
+
+  return new ORPCError("INTERNAL_SERVER_ERROR");
 }
 
 /**

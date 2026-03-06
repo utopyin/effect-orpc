@@ -14,8 +14,12 @@ const NodeSdkLive = NodeSdk.layer(() => ({
   ),
 }));
 
-export const AppLive = Layer.mergeAll(Logger.pretty, OrderService.Default).pipe(
-  Layer.provideMerge(NodeSdkLive),
+const LoggerLive = Logger.layer([Logger.consolePretty()]);
+
+export const AppLive = Layer.mergeAll(
+  LoggerLive,
+  NodeSdkLive,
+  OrderService.layer,
 );
 
 export const runtime = ManagedRuntime.make(AppLive);

@@ -130,7 +130,6 @@ describe("effectBuilder", () => {
   });
 
   it(".effect", () => {
-    // oxlint-disable-next-line require-yield
     const effectFn = vi.fn(function* () {
       return { result: "test" };
     });
@@ -142,7 +141,6 @@ describe("effectBuilder", () => {
   });
 
   it(".effect runs effect with runtime", async () => {
-    // oxlint-disable-next-line require-yield
     const effectFn = vi.fn(function* ({ input }: { input: any }) {
       return { output: `processed-${input}` };
     });
@@ -293,7 +291,6 @@ describe("makeEffectORPC factory", () => {
   it("creates working procedure with default os", async () => {
     const effectBuilder = makeEffectORPC(runtime);
 
-    // oxlint-disable-next-line require-yield
     const procedure = effectBuilder.effect(function* () {
       return "hello";
     });
@@ -343,7 +340,6 @@ describe("makeEffectORPC factory", () => {
       .route({ path: "/test" })
       .input(z.object({ id: z.string() }))
       .output(z.object({ name: z.string() }))
-      // oxlint-disable-next-line require-yield
       .effect(function* () {
         return { name: "test" };
       });
@@ -430,7 +426,6 @@ describe(".traced", () => {
     const procedure = effectBuilder
       .input(z.object({ id: z.string() }))
       .traced("users.getUser")
-      // oxlint-disable-next-line require-yield
       .effect(function* () {
         return { name: "test" };
       });
@@ -445,7 +440,6 @@ describe(".traced", () => {
     const procedure = effectBuilder
       .input(z.object({ id: z.string() }))
       .traced("users.getUser")
-      // oxlint-disable-next-line require-yield
       .effect(function* ({ input }) {
         return { id: input.id, name: "Alice" };
       });
@@ -507,7 +501,6 @@ describe("default tracing (without .traced())", () => {
     // No .traced() call - should still work and use path as span name
     const procedure = effectBuilder
       .input(z.object({ id: z.string() }))
-      // oxlint-disable-next-line require-yield
       .effect(function* ({ input }) {
         return { id: input.id, name: "Bob" };
       });
@@ -529,7 +522,6 @@ describe("default tracing (without .traced())", () => {
     const effectBuilder = makeEffectORPC(runtime);
 
     // Without .traced(), the span name should be derived from path
-    // oxlint-disable-next-line require-yield
     const procedure = effectBuilder.effect(function* () {
       return "hello";
     });
@@ -551,14 +543,11 @@ describe("default tracing (without .traced())", () => {
   it("default tracing works with Effect.fn generator", async () => {
     const effectBuilder = makeEffectORPC(runtime);
 
-    const procedure = effectBuilder.effect(
-      // oxlint-disable-next-line require-yield
-      function* () {
-        const x = 5;
-        const y = 10;
-        return x * y;
-      },
-    );
+    const procedure = effectBuilder.effect(function* () {
+      const x = 5;
+      const y = 10;
+      return x * y;
+    });
 
     const result = await procedure["~effect"].handler({
       context: {},
@@ -625,7 +614,6 @@ describe("default tracing (without .traced())", () => {
       .output(declaredOutputSchema)
       .effect(
         // @ts-expect-error input().output() should constrain the effect return type
-        // oxlint-disable-next-line require-yield
         function* () {
           return { count: 1 };
         },
@@ -634,7 +622,6 @@ describe("default tracing (without .traced())", () => {
     const procedure = makeEffectORPC(runtime)
       .output(declaredOutputSchema)
       // @ts-expect-error output() should constrain the effect return type
-      // oxlint-disable-next-line require-yield
       .effect(function* () {
         return { count: 1 };
       });

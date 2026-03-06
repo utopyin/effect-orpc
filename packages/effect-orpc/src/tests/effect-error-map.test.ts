@@ -233,7 +233,6 @@ describe("effectBuilder with EffectErrorMap", () => {
         BAD_REQUEST: { status: 400 },
       })
       .input(z.object({ id: z.string() }))
-      // oxlint-disable-next-line require-yield
       .effect(function* ({ input, errors }) {
         // errors.USER_NOT_FOUND_ERROR is the class
         expect(errors.USER_NOT_FOUND_ERROR).toBe(UserNotFoundError);
@@ -255,7 +254,6 @@ describe("effectBuilder with EffectErrorMap", () => {
         USER_NOT_FOUND_ERROR: UserNotFoundError,
       })
       .input(z.object({ id: z.string() }))
-      // oxlint-disable-next-line require-yield
       .effect(function* ({ input, errors }) {
         if (input.id === "not-found") {
           return yield* Effect.fail(
@@ -299,7 +297,6 @@ describe("effectDecoratedProcedure.errors()", () => {
   it("should support adding errors to procedure", () => {
     const procedure = effectOs
       .input(z.object({ id: z.string() }))
-      // oxlint-disable-next-line require-yield
       .effect(function* ({ input }) {
         return { id: input.id };
       })
@@ -314,7 +311,6 @@ describe("effectDecoratedProcedure.errors()", () => {
     const procedure = effectOs
       .errors({ BAD_REQUEST: { status: 400 } })
       .input(z.object({ id: z.string() }))
-      // oxlint-disable-next-line require-yield
       .effect(function* ({ input }) {
         return { id: input.id };
       })

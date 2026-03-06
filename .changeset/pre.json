@@ -1,0 +1,10 @@
+{
+  "mode": "pre",
+  "tag": "effect-v4",
+  "initialVersions": {
+    "effect-orpc": "0.1.2"
+  },
+  "changesets": [
+    "fluffy-times-shave"
+  ]
+}

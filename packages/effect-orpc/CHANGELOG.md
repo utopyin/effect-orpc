@@ -12,7 +12,7 @@
 
 - ac41539: docs: remove duplicate request-scoped context section
 
-## 1.0.0-v4.0
+## 1.0.0-effect-v4.0
 
 ### Major Changes
 

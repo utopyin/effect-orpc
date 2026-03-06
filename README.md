@@ -302,6 +302,14 @@ app.use("*", async (c, next) => {
 });
 ```
 
+When a captured fiber context and the `ManagedRuntime` both provide the same
+service, `effect-orpc` prioritizes the captured context. The runtime is treated
+as the application-wide base layer, while `withFiberContext` preserves the
+more specific request-scoped values from outer middleware. This prevents
+request-local references such as request IDs, logging annotations, tracing
+context, or scoped overrides from being replaced by runtime defaults when the
+handler crosses the runtime boundary.
+
 The reason for the separate `/node` entrypoint is that `withFiberContext` relies
 on Node/Bun's `AsyncLocalStorage` from `node:async_hooks` to carry Effect
 `FiberRef` state across framework async boundaries. The main package stays

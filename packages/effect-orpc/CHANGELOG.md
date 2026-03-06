@@ -1,5 +1,11 @@
 # effect-orpc
 
+## 0.1.3
+
+### Patch Changes
+
+- ed5bc70: Sync readme from root to package so that it gets published on NPM
+
 ## 0.1.2
 
 ### Patch Changes

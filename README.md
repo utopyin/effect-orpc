@@ -29,7 +29,7 @@ Runnable demos live in the repository's `examples/` directory.
 
 ```ts
 import { os } from "@orpc/server";
-import { Effect, ManagedRuntime } from "effect";
+import { Effect, Layer, ManagedRuntime, ServiceMap } from "effect";
 import { makeEffectORPC, ORPCTaggedError } from "effect-orpc";
 
 interface User {
@@ -53,12 +53,16 @@ const authedOs = os
   });
 
 // Define your services
-class UsersRepo extends Effect.Service<UsersRepo>()("UsersRepo", {
-  accessors: true,
-  sync: () => ({
+class UsersRepo extends ServiceMap.Service<
+  UsersRepo,
+  {
+    readonly get: (id: number) => User | undefined;
+  }
+>()("UsersRepo") {
+  static readonly layer = Layer.succeed(this, {
     get: (id: number) => users.find((u) => u.id === id),
-  }),
-}) {}
+  });
+}
 
 // Special yieldable oRPC error class
 class UserNotFoundError extends ORPCTaggedError("UserNotFoundError", {
@@ -66,7 +70,7 @@ class UserNotFoundError extends ORPCTaggedError("UserNotFoundError", {
 }) {}
 
 // Create runtime with your services
-const runtime = ManagedRuntime.make(UsersRepo.Default);
+const runtime = ManagedRuntime.make(UsersRepo.layer);
 // Create Effect-aware oRPC builder from an other (optional) base oRPC builder and provide tagged errors
 const effectOs = makeEffectORPC(runtime, authedOs).errors({
   UserNotFoundError,
@@ -77,7 +81,8 @@ export const router = {
   health: os.handler(() => "ok"),
   users: {
     me: effectOs.effect(function* ({ context: { userId } }) {
-      const user = yield* UsersRepo.get(userId);
+      const usersRepo = yield* UsersRepo;
+      const user = usersRepo.get(userId);
       if (!user) {
         return yield* new UserNotFoundError();
       }
@@ -89,23 +94,63 @@ export const router = {
 export type Router = typeof router;
 ```
 
+## Request-Scoped Context
+
+If you run `effect-orpc` inside a framework such as Hono, the handler executes
+through the runtime boundary and will not automatically inherit request-local
+Effect context from outer middleware.
+
+Wrap the framework continuation with `withFiberContext` from
+`effect-orpc/node` to preserve request-scoped logs, tracing annotations, and
+other `ServiceMap.Reference`-backed values across async boundaries.
+
+```ts
+import { Hono } from "hono";
+import { Effect, ManagedRuntime } from "effect";
+import { makeEffectORPC } from "effect-orpc";
+import { withFiberContext } from "effect-orpc/node";
+
+const runtime = ManagedRuntime.make(AppLive);
+const effectOs = makeEffectORPC(runtime);
+const app = new Hono();
+
+app.use("*", async (c, next) => {
+  await Effect.runPromise(
+    Effect.gen(function* () {
+      yield* Effect.annotateLogsScoped({
+        requestId: c.get("requestId"),
+      });
+
+      yield* withFiberContext(() => next());
+    }),
+  );
+});
+```
+
+If you do not need framework-to-handler context propagation, you do not need the
+`/node` entrypoint at all.
+
 ## Type Safety
 
 The wrapper enforces that Effect procedures only use services provided by the `ManagedRuntime`. If you try to use a service that isn't in the runtime, you'll get a compile-time error:
 
 ```ts
-import { Context, Effect, Layer, ManagedRuntime } from "effect";
+import { Effect, Layer, ManagedRuntime, ServiceMap } from "effect";
 import { makeEffectORPC } from "effect-orpc";
 
-class ProvidedService extends Context.Tag("ProvidedService")<
+class ProvidedService extends ServiceMap.Service<
   ProvidedService,
-  { doSomething: () => Effect.Effect<string> }
->() {}
+  {
+    readonly doSomething: () => Effect.Effect<string>;
+  }
+>()("ProvidedService") {}
 
-class MissingService extends Context.Tag("MissingService")<
+class MissingService extends ServiceMap.Service<
   MissingService,
-  { doSomething: () => Effect.Effect<string> }
->() {}
+  {
+    readonly doSomething: () => Effect.Effect<string>;
+  }
+>()("MissingService") {}
 
 const runtime = ManagedRuntime.make(
   Layer.succeed(ProvidedService, {

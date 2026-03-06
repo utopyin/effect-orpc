@@ -1,6 +1,6 @@
 import { OpenAPIHandler } from "@orpc/openapi/fetch";
 import { OpenAPIReferencePlugin } from "@orpc/openapi/plugins";
-import { onError, os } from "@orpc/server";
+import { onError, ORPCError } from "@orpc/server";
 import { CORSPlugin } from "@orpc/server/plugins";
 import { ZodToJsonSchemaConverter } from "@orpc/zod/zod4";
 import { serve } from "bun";
@@ -33,10 +33,10 @@ app.use("/*", async (c, next) => {
     yield* Effect.logInfo(`[Response] ${method} ${path} (${c.res.status})`);
   }).pipe(Effect.scoped, Effect.withSpan(`${method} ${path}`));
 
-  await runtime.runPromise(requestEffect);
+  await Effect.runPromise(requestEffect);
 });
 
-const o = makeEffectORPC(runtime, os);
+const o = makeEffectORPC(runtime);
 
 const router = {
   orders: o
@@ -72,7 +72,14 @@ const openAPIHandler = new OpenAPIHandler(router, {
   ],
   interceptors: [
     onError(async (error) => {
-      await runtime.runPromise(pipe(Effect.logError("oRPC Error", error)));
+      await runtime.runPromise(
+        pipe(
+          Effect.logError(
+            "oRPC Error",
+            error instanceof ORPCError ? [error, error.cause] : error,
+          ),
+        ),
+      );
     }),
   ],
 });

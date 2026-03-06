@@ -1,5 +1,11 @@
 # effect-orpc
 
+## 1.0.0-v4.0
+
+### Major Changes
+
+- 045df4a: migrate to effect-v4 (effect-smol)
+
 ## 0.1.3
 
 ### Patch Changes

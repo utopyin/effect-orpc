@@ -1,3 +1,12 @@
+export { eoc } from "./eoc";
+export type {
+  EffectContractBuilder,
+  EffectContractProcedureBuilder,
+  EffectContractProcedureBuilderWithInput,
+  EffectContractProcedureBuilderWithInputOutput,
+  EffectContractProcedureBuilderWithOutput,
+  EffectContractRouterBuilder,
+} from "./eoc";
 export {
   addSpanStackTrace,
   EffectBuilder,

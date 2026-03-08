@@ -84,6 +84,21 @@ describe("isORPCTaggedErrorClass", () => {
 });
 
 describe("createEffectErrorConstructorMap", () => {
+  it("preserves declaration keys even when a tagged error class uses a different code", () => {
+    const errorMap = {
+      NOT_FOUND: UserNotFoundError,
+    } satisfies EffectErrorMap;
+
+    const constructorMap = createEffectErrorConstructorMap(errorMap);
+    const userNotFoundError = constructorMap.NOT_FOUND({
+      data: { userId: "123" },
+    });
+
+    expect(constructorMap).not.toHaveProperty("USER_NOT_FOUND_ERROR");
+    expect(userNotFoundError).toBeInstanceOf(UserNotFoundError);
+    expect(userNotFoundError.code).toBe("USER_NOT_FOUND_ERROR");
+  });
+
   it("should pass through tagged error classes", () => {
     const errorMap = {
       USER_NOT_FOUND_ERROR: UserNotFoundError,

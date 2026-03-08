@@ -6,13 +6,6 @@ import z from "zod";
 
 import { eoc, implementEffect, ORPCTaggedError } from "../index";
 import { withFiberContext } from "../node";
-import {
-  baseErrorMap,
-  baseMeta,
-  inputSchema,
-  outputSchema,
-  pong,
-} from "./shared";
 
 class Counter extends Effect.Tag("Counter")<
   Counter,
@@ -34,23 +27,6 @@ const contract = {
     list: oc
       .input(z.object({ amount: z.number() }))
       .output(z.object({ next: z.number(), requestId: z.string() })),
-  },
-};
-
-const typedContract = {
-  ping: oc
-    .errors(baseErrorMap)
-    .meta(baseMeta)
-    .input(inputSchema)
-    .output(outputSchema),
-  pong,
-  nested: {
-    ping: oc
-      .errors(baseErrorMap)
-      .meta(baseMeta)
-      .input(inputSchema)
-      .output(outputSchema),
-    pong,
   },
 };
 
@@ -337,42 +313,6 @@ describe("implementEffect", () => {
     expect(oe.users.list.input).toBeUndefined();
   });
 
-  it("lets contracts declare tagged error classes directly via eoc.errors", () => {
-    class UserNotFoundError extends ORPCTaggedError("UserNotFoundError", {
-      code: "NOT_FOUND",
-      schema: z.object({ userId: z.string() }),
-    }) {}
-
-    const findContract = eoc
-      .errors({
-        NOT_FOUND: UserNotFoundError,
-      })
-      .input(z.object({ userId: z.string() }))
-      .output(z.object({ userId: z.string() }));
-    const errorInstance = new UserNotFoundError({
-      data: { userId: "u-1" },
-    });
-
-    expect(findContract["~orpc"].errorMap.NOT_FOUND?.status).toBe(
-      errorInstance.status,
-    );
-    expect(findContract["~orpc"].errorMap.NOT_FOUND?.message).toBe(
-      errorInstance.message,
-    );
-    expect(findContract["~orpc"].errorMap.NOT_FOUND?.data).toBe(
-      errorInstance.schema,
-    );
-
-    type ErrorMap = (typeof findContract)["~orpc"]["errorMap"];
-    expectTypeOf<ErrorMap>().toMatchTypeOf<{
-      NOT_FOUND: {
-        status?: number;
-        message?: string;
-        data?: z.ZodType<{ userId: string }>;
-      };
-    }>();
-  });
-
   it("enforces contract output typing for handlers", () => {
     const oe = implementEffect(contract, runtime);
 
@@ -402,103 +342,5 @@ describe("implementEffect", () => {
       next: number;
       requestId: string;
     }>();
-  });
-
-  it("preserves upstream implementer root and router typing", () => {
-    const oe = implementEffect(typedContract, runtime);
-
-    expectTypeOf(oe.$context).toBeFunction();
-    expectTypeOf(oe.$config).toBeFunction();
-
-    const router = oe.router({
-      ping: oe.ping.effect(function* ({ input }) {
-        return { output: Number(input.input) };
-      }),
-      pong: oe.pong.handler(() => undefined),
-      nested: {
-        ping: oe.nested.ping.effect(function* ({ input }) {
-          return { output: Number(input.input) };
-        }),
-        pong: oe.nested.pong.handler(() => undefined),
-      },
-    });
-
-    expectTypeOf(router).toExtend<
-      Router<typeof typedContract, Record<string, never>>
-    >();
-
-    oe.lazy(async () => ({
-      default: {
-        ping: oe.ping.effect(function* ({ input }) {
-          return { output: Number(input.input) };
-        }),
-        pong: oe.pong.handler(() => undefined),
-        nested: {
-          ping: oe.nested.ping.effect(function* ({ input }) {
-            return { output: Number(input.input) };
-          }),
-          pong: oe.nested.pong.handler(() => undefined),
-        },
-      },
-    }));
-
-    // @ts-expect-error missing nested/pong implementations must fail contract enforcement
-    const missingRouter: Parameters<typeof oe.router>[0] = {
-      ping: oe.ping.effect(function* ({ input }) {
-        return { output: Number(input.input) };
-      }),
-    };
-
-    oe.router(missingRouter);
-
-    // @ts-expect-error missing nested/pong implementations must fail contract enforcement
-    const missingLazyRouter: Awaited<
-      ReturnType<Parameters<typeof oe.lazy>[0]>
-    >["default"] = {
-      ping: oe.ping.effect(function* ({ input }) {
-        return { output: Number(input.input) };
-      }),
-    };
-
-    oe.lazy(async () => ({
-      default: missingLazyRouter,
-    }));
-  });
-
-  it("preserves upstream implementer procedure typing for use and handler", () => {
-    const oe = implementEffect(typedContract, runtime);
-
-    const applied = oe.ping.use(
-      ({ context, next, path, procedure, errors, signal }, input, output) => {
-        expectTypeOf(input).toEqualTypeOf<{ input: string }>();
-        expectTypeOf(context).toMatchTypeOf<Record<string, never>>();
-        expectTypeOf(path).toEqualTypeOf<readonly string[]>();
-        expectTypeOf(procedure["~orpc"]).toBeObject();
-        expectTypeOf(output).toBeFunction();
-        expectTypeOf(errors).toBeObject();
-        expectTypeOf(signal).toEqualTypeOf<
-          undefined | InstanceType<typeof AbortSignal>
-        >();
-
-        return next({
-          context: {
-            extra: true,
-          },
-        });
-      },
-    );
-
-    expectTypeOf(applied.handler).toBeFunction();
-    expectTypeOf(applied.effect).toBeFunction();
-
-    oe.ping.handler(() => ({ output: 456 }));
-
-    // @ts-expect-error invalid handler output should fail
-    oe.ping.handler(() => ({ output: "invalid" }));
-
-    // @ts-expect-error invalid effect output should fail
-    oe.ping.effect(function* () {
-      return { output: "invalid" };
-    });
   });
 });

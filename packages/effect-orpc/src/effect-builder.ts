@@ -8,13 +8,7 @@ import type {
   Route,
   Schema,
 } from "@orpc/contract";
-import {
-  mergeMeta,
-  mergePrefix,
-  mergeRoute,
-  mergeTags,
-  ORPCError,
-} from "@orpc/contract";
+import { mergeMeta, mergePrefix, mergeRoute, mergeTags } from "@orpc/contract";
 import type {
   AnyMiddleware,
   BuilderConfig,
@@ -26,7 +20,6 @@ import type {
   MergedInitialContext,
   Middleware,
   ProcedureHandler,
-  ProcedureHandlerOptions,
   Router,
 } from "@orpc/server";
 import {
@@ -38,21 +31,16 @@ import {
 } from "@orpc/server";
 import type { IntersectPick } from "@orpc/shared";
 import type { ManagedRuntime } from "effect";
-import { Cause, Effect, Exit, FiberRefs } from "effect";
 
 import { enhanceEffectRouter } from "./effect-enhance-router";
 import { EffectDecoratedProcedure } from "./effect-procedure";
-import { getCurrentFiberRefs } from "./fiber-context-bridge";
+import { createEffectProcedureHandler } from "./effect-runtime";
 import type {
   EffectErrorConstructorMap,
   EffectErrorMap,
   MergedEffectErrorMap,
 } from "./tagged-error";
-import {
-  createEffectErrorConstructorMap,
-  effectErrorMapToErrorMap,
-  isORPCTaggedError,
-} from "./tagged-error";
+import { effectErrorMapToErrorMap } from "./tagged-error";
 import type {
   AnyBuilderLike,
   EffectBuilderDef,
@@ -603,79 +591,13 @@ export class EffectBuilder<
     return new EffectDecoratedProcedure({
       ...this["~effect"],
       handler: async (opts) => {
-        const effectOpts: ProcedureHandlerOptions<
-          TCurrentContext,
-          InferSchemaOutput<TInputSchema>,
-          EffectErrorConstructorMap<TEffectErrorMap>,
-          TMeta
-        > = {
-          context: opts.context,
-          input: opts.input,
-          path: opts.path,
-          procedure: opts.procedure,
-          signal: opts.signal,
-          lastEventId: opts.lastEventId,
-          errors: createEffectErrorConstructorMap(
-            this["~effect"].effectErrorMap,
-          ),
-        };
-        const spanName = spanConfig?.name ?? opts.path.join(".");
-        const captureStackTrace =
-          spanConfig?.captureStackTrace ?? defaultCaptureStackTrace;
-        const resolver = Effect.fnUntraced(effectFn);
-        const tracedEffect = Effect.withSpan(resolver(effectOpts), spanName, {
-          captureStackTrace,
-        });
-        const parentFiberRefs = getCurrentFiberRefs();
-        const effectWithRefs = parentFiberRefs
-          ? Effect.fiberIdWith((fiberId) =>
-              Effect.flatMap(Effect.getFiberRefs, (fiberRefs) =>
-                Effect.setFiberRefs(
-                  FiberRefs.joinAs(fiberRefs, fiberId, parentFiberRefs),
-                ).pipe(Effect.andThen(tracedEffect)),
-              ),
-            )
-          : tracedEffect;
-        const exit = await runtime.runPromiseExit(effectWithRefs, {
-          signal: opts.signal,
-        });
-
-        if (Exit.isFailure(exit)) {
-          throw Cause.match(exit.cause, {
-            onDie(defect) {
-              return new ORPCError("INTERNAL_SERVER_ERROR", {
-                cause: defect,
-              });
-            },
-            onFail(error) {
-              if (isORPCTaggedError(error)) {
-                return error.toORPCError();
-              }
-              if (error instanceof ORPCError) {
-                return error;
-              }
-              return new ORPCError("INTERNAL_SERVER_ERROR", {
-                cause: error,
-              });
-            },
-            onInterrupt(fiberId) {
-              return new ORPCError("INTERNAL_SERVER_ERROR", {
-                cause: new Error(`${fiberId} Interrupted`),
-              });
-            },
-            onSequential(left) {
-              return left;
-            },
-            onEmpty: new ORPCError("INTERNAL_SERVER_ERROR", {
-              cause: new Error("Unknown error"),
-            }),
-            onParallel(left) {
-              return left;
-            },
-          });
-        }
-
-        return exit.value;
+        return createEffectProcedureHandler({
+          runtime,
+          effectErrorMap: this["~effect"].effectErrorMap,
+          effectFn,
+          spanConfig,
+          defaultCaptureStackTrace,
+        })(opts as any);
       },
     });
   }

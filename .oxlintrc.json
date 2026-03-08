@@ -2,6 +2,7 @@
   "$schema": "./node_modules/oxlint/configuration_schema.json",
   "extends": ["ultracite/oxlint/core"],
   "rules": {
-    "require-yield": "off"
+    "require-yield": "off",
+    "no-unused-vars": "error"
   }
 }

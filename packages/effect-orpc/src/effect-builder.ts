@@ -14,6 +14,7 @@ import type {
   BuilderConfig,
   BuilderDef,
   Context,
+  DecoratedMiddleware,
   Lazy,
   MapInputMiddleware,
   MergedCurrentContext,
@@ -292,6 +293,35 @@ export class EffectBuilder<
       ...this["~effect"],
       inputSchema: initialInputSchema,
     });
+  }
+
+  /**
+   * Creates a middleware.
+   *
+   * @see {@link https://orpc.dev/docs/middleware Middleware Docs}
+   */
+  middleware<
+    UOutContext extends IntersectPick<TCurrentContext, UOutContext>,
+    TInput,
+    TOutput = any,
+  >(
+    middleware: Middleware<
+      TInitialContext,
+      UOutContext,
+      TInput,
+      TOutput,
+      EffectErrorConstructorMap<TEffectErrorMap>,
+      TMeta
+    >,
+  ): DecoratedMiddleware<
+    TInitialContext,
+    UOutContext,
+    TInput,
+    TOutput,
+    any,
+    TMeta
+  > {
+    return decorateMiddleware(middleware);
   }
 
   /**

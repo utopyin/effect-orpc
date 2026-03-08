@@ -12,13 +12,17 @@ import type {
 import { isContractProcedure } from "@orpc/contract";
 import type {
   BuilderConfig,
+  BuilderDef,
   Context,
+  DecoratedMiddleware,
+  ImplementedProcedure,
   Lazy,
   MapInputMiddleware,
   MergedCurrentContext,
   MergedInitialContext,
   Middleware,
   ORPCErrorConstructorMap,
+  ProcedureHandler,
   Router,
 } from "@orpc/server";
 import { implement } from "@orpc/server";
@@ -32,7 +36,7 @@ import { createEffectProcedureHandler } from "./effect-runtime";
 import { effectContractSymbol, getEffectContractErrorMap } from "./eoc";
 import type { EffectErrorMap } from "./tagged-error";
 import { effectErrorMapToErrorMap } from "./tagged-error";
-import type { EffectProcedureHandler } from "./types";
+import type { EffectErrorMapToErrorMap, EffectProcedureHandler } from "./types";
 
 type ContractLeafEffectHandler<
   TCurrentContext extends Context,
@@ -71,12 +75,12 @@ export interface EffectProcedureImplementer<
   TRequirementsProvided,
   TRuntimeError,
 > {
-  "~orpc": {
-    readonly inputSchema?: TInputSchema;
-    readonly outputSchema?: TOutputSchema;
-    readonly errorMap: ErrorMap;
-    readonly meta: TMeta;
-  };
+  "~orpc": BuilderDef<
+    TInputSchema,
+    TOutputSchema,
+    EffectErrorMapToErrorMap<TErrorMap>,
+    TMeta
+  >;
   use<
     UOutContext extends IntersectPick<TCurrentContext, UOutContext>,
     UInContext extends Context = TCurrentContext,
@@ -124,14 +128,20 @@ export interface EffectProcedureImplementer<
     TRuntimeError
   >;
   handler(
-    handler: (
-      options: any,
-    ) =>
-      | InferSchemaInput<TOutputSchema>
-      | Promise<InferSchemaInput<TOutputSchema>>,
-  ): Router<
-    ContractProcedure<TInputSchema, TOutputSchema, ErrorMap, TMeta>,
-    TCurrentContext
+    handler: ProcedureHandler<
+      TCurrentContext,
+      InferSchemaOutput<TInputSchema>,
+      InferSchemaInput<TOutputSchema>,
+      EffectErrorMapToErrorMap<TErrorMap>,
+      TMeta
+    >,
+  ): ImplementedProcedure<
+    TInitialContext,
+    TCurrentContext,
+    TInputSchema,
+    TOutputSchema,
+    EffectErrorMapToErrorMap<TErrorMap>,
+    TMeta
   >;
   effect(
     effectFn: ContractLeafEffectHandler<
@@ -191,7 +201,14 @@ export type EffectImplementerInternal<
             ORPCErrorConstructorMap<InferContractRouterErrorMap<TContract>>,
             InferContractRouterMeta<TContract>
           >,
-        ): unknown;
+        ): DecoratedMiddleware<
+          TInitialContext,
+          UOutContext,
+          TInput,
+          TOutput,
+          any,
+          InferContractRouterMeta<TContract>
+        >;
         use<
           UOutContext extends IntersectPick<TCurrentContext, UOutContext>,
           UInContext extends Context = TCurrentContext,

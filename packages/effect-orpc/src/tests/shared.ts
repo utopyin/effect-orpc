@@ -76,3 +76,5 @@ export const streamed = new ContractProcedure<
   inputSchema,
   outputSchema: streamedOutputSchema,
 });
+
+export type AssertExtends<_TActual extends TExpected, TExpected> = true;

@@ -1,3 +1,9 @@
+export { implementEffect } from "./contract";
+export type {
+  EffectImplementer,
+  EffectImplementerInternal,
+  EffectProcedureImplementer,
+} from "./contract";
 export { eoc } from "./eoc";
 export type {
   EffectContractBuilder,
@@ -49,10 +55,10 @@ export type {
   EffectProcedureHandler,
   EffectRouterBuilder,
   EffectSpanConfig,
-  InferBuilderInitialContext,
   InferBuilderCurrentContext,
-  InferBuilderInputSchema,
-  InferBuilderOutputSchema,
   InferBuilderErrorMap,
+  InferBuilderInitialContext,
+  InferBuilderInputSchema,
   InferBuilderMeta,
+  InferBuilderOutputSchema,
 } from "./types";

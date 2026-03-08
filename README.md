@@ -318,6 +318,55 @@ runtime-agnostic.
 If you do not need framework-to-handler fiber propagation, you do not need the
 `/node` entrypoint at all.
 
+## Contract-First Usage
+
+Use `implementEffect(contract, runtime)` when you already have an oRPC contract
+and want to keep contract-first enforcement while adding Effect-native handlers.
+Use `makeEffectORPC(runtime, builder?)` when you want to build procedures
+directly from an oRPC builder.
+
+```ts
+import { Effect, ManagedRuntime } from "effect";
+import { eoc, implementEffect } from "effect-orpc";
+import z from "zod";
+
+class UsersRepo extends Effect.Service<UsersRepo>()("UsersRepo", {
+  accessors: true,
+  sync: () => ({
+    list: (amount: number) =>
+      Array.from({ length: amount }, (_, index) => `user-${index + 1}`),
+  }),
+}) {}
+
+const contract = {
+  users: {
+    list: eoc
+      .input(z.object({ amount: z.number().int().positive() }))
+      .output(z.array(z.string())),
+  },
+};
+
+const runtime = ManagedRuntime.make(UsersRepo.Default);
+const oe = implementEffect(contract, runtime);
+
+export const router = oe.router({
+  users: {
+    list: oe.users.list.effect(function* ({ input }) {
+      return yield* UsersRepo.list(input.amount);
+    }),
+  },
+});
+```
+
+Contract leaves keep the contract-defined input, output, and error surface.
+They add `.effect(...)` alongside existing implementer methods such as
+`.handler(...)` and `.use(...)`, but do not expose contract-changing builder
+methods like `.input(...)` or `.output(...)`.
+
+If your contract declares tagged Effect error classes, prefer `eoc.errors(...)`
+instead of raw `oc.errors(...)` so the error schema and metadata are derived
+directly from the `ORPCTaggedError` class.
+
 ## API Reference
 
 ### `makeEffectORPC(runtime, builder?)`
@@ -335,6 +384,52 @@ const effectOs = makeEffectORPC(runtime);
 
 // With customized builder
 const effectAuthedOs = makeEffectORPC(runtime, authedBuilder);
+```
+
+### `implementEffect(contract, runtime)`
+
+Creates an Effect-aware contract implementer.
+
+- `contract` - An oRPC contract router built with `oc`
+- `runtime` - A `ManagedRuntime<R, E>` instance that provides services for Effect procedures
+
+Returns a contract-shaped implementer tree whose leaves support `.effect(...)`.
+
+```ts
+const oe = implementEffect(contract, runtime);
+
+const router = oe.router({
+  users: {
+    list: oe.users.list.effect(function* ({ input }) {
+      return yield* UsersRepo.list(input.amount);
+    }),
+  },
+});
+```
+
+### `eoc`
+
+An Effect-aware wrapper around oRPC's `oc` contract builder.
+
+Use it when you want contract definitions to accept `ORPCTaggedError` classes
+directly in `.errors(...)` without duplicating the error schema.
+
+```ts
+class UserNotFoundError extends ORPCTaggedError("UserNotFoundError", {
+  code: "NOT_FOUND",
+  schema: z.object({ userId: z.string() }),
+}) {}
+
+const contract = {
+  users: {
+    find: eoc
+      .errors({
+        NOT_FOUND: UserNotFoundError,
+      })
+      .input(z.object({ userId: z.string() }))
+      .output(z.object({ userId: z.string() })),
+  },
+};
 ```
 
 ### `EffectBuilder`

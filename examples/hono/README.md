@@ -28,8 +28,15 @@ bun start
 ```
 
 The API is served on `http://localhost:3000/api` by default.
+The RPC endpoint is served on `http://localhost:3000/rpc`.
 
 OpenAPI docs are available at `http://localhost:3000/docs`.
+
+Run the RPC client test suite with:
+
+```bash
+bun test
+```
 
 ## Routes
 

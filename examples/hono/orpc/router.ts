@@ -1,6 +1,7 @@
 import { OpenAPIHandler } from "@orpc/openapi/fetch";
 import { OpenAPIReferencePlugin } from "@orpc/openapi/plugins";
 import { onError, ORPCError } from "@orpc/server";
+import { RPCHandler } from "@orpc/server/fetch";
 import { CORSPlugin } from "@orpc/server/plugins";
 import { ZodToJsonSchemaConverter } from "@orpc/zod/zod4";
 import { Effect, pipe } from "effect";
@@ -19,7 +20,7 @@ import {
 import { runtime } from "../runtime";
 import { OrderService } from "../services/order";
 
-const contract = contractRouterBuilder.router({
+export const contract = contractRouterBuilder.router({
   diagnostics: diagnosticsContract,
   orders: ordersContract,
   admin: adminContract,
@@ -124,7 +125,7 @@ const contractRouter = contractImplementer.router({
         ({ next }, input: z.infer<typeof orderLookupInputSchema>) =>
           next({
             context: {
-              normalizedOrderId: input.orderId,
+              normalizedOrderId: input.orderId.trim().toUpperCase(),
             },
           }),
         (input) => ({
@@ -133,7 +134,8 @@ const contractRouter = contractImplementer.router({
         }),
       )
       .effect(function* ({ context, input, errors }) {
-        const order = yield* OrderService.getOrder(input.orderId);
+        const normalizedOrderId = input.orderId.trim().toUpperCase();
+        const order = yield* OrderService.getOrder(normalizedOrderId);
 
         if (order.status === "not found") {
           return yield* Effect.fail(
@@ -336,6 +338,22 @@ export const router = {
   direct: directRouter,
   contract: contractRouter,
 };
+
+export const rpcHandler = new RPCHandler(router, {
+  plugins: [new CORSPlugin()],
+  interceptors: [
+    onError(async (error) => {
+      await runtime.runPromise(
+        pipe(
+          Effect.logError(
+            "oRPC Error",
+            error instanceof ORPCError ? [error, error.cause] : error,
+          ),
+        ),
+      );
+    }),
+  ],
+});
 
 export const openAPIHandler = new OpenAPIHandler(router, {
   plugins: [

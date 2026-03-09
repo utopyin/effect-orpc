@@ -1,5 +1,53 @@
 # effect-orpc
 
+## 0.2.0
+
+### Minor Changes
+
+- ce9f590: Add `eoc`, an Effect-aware wrapper around `@orpc/contract`'s `oc`, so contract definitions can reuse tagged error classes directly in `.errors(...)`.
+
+  Example:
+
+  ```ts
+  class UserNotFoundError extends ORPCTaggedError("UserNotFoundError", {
+    code: "NOT_FOUND",
+    schema: z.object({ userId: z.string() }),
+  }) {}
+
+  const contract = {
+    users: {
+      find: eoc
+        .errors({
+          NOT_FOUND: UserNotFoundError,
+        })
+        .input(z.object({ userId: z.string() }))
+        .output(z.object({ userId: z.string() })),
+    },
+  };
+  ```
+
+- 5e42e78: Add `implementEffect(contract, runtime)` for contract-first oRPC handlers backed by Effect, including contract leaf `.effect(...)` support and root router enhancement.
+
+  Example:
+
+  ```ts
+  const oe = implementEffect(contract, runtime);
+
+  export const router = oe.router({
+    users: {
+      list: oe.users.list.effect(function* ({ input }) {
+        return yield* UsersRepo.list(input.amount);
+      }),
+    },
+  });
+  ```
+
+### Patch Changes
+
+- 926dbf4: Document the new contract-first APIs with examples for `eoc` and `implementEffect`.
+- 6937a19: Restore wrapped oRPC builder and implementer parity by aligning `.middleware(...)`, `.handler(...)`, and related variant typings with upstream behavior.
+- 92ca0eb: Add parity regression coverage for wrapped oRPC contract builders, Effect builders, and contract implementers.
+
 ## 0.1.4
 
 ### Patch Changes

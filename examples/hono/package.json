@@ -1,5 +1,5 @@
 {
-  "name": "effect-orpc-example-hono-request-context",
+  "name": "effect-orpc-example-hono",
   "private": true,
   "type": "module",
   "scripts": {

@@ -137,7 +137,7 @@ describe("parity: @orpc/server builder.test-d.ts", () => {
   });
 
   it(".handler / .effect / .prefix / .tag / .router / .lazy", () => {
-    expectTypeOf(withOutput.handler(() => ({ output: 456 }))).toMatchTypeOf<
+    expectTypeOf(withOutput.handler(() => ({ output: 456 }))).toExtend<
       EffectDecoratedProcedure<
         InitialContext & Record<never, never>,
         CurrentContext,
@@ -154,7 +154,7 @@ describe("parity: @orpc/server builder.test-d.ts", () => {
       withOutput.effect(function* () {
         return { output: 456 };
       }),
-    ).toMatchTypeOf<
+    ).toExtend<
       EffectDecoratedProcedure<
         InitialContext & Record<never, never>,
         CurrentContext,

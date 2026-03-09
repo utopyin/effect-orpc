@@ -50,8 +50,12 @@ describe("effectErrorMap types", () => {
   });
 
   it("should infer correct union type from EffectErrorMap", () => {
+    const zBadRequestData = z.object({
+      status: z.number(),
+      message: z.string(),
+    });
     type TestErrorMap = {
-      BAD_REQUEST: { status?: number; message?: string };
+      BAD_REQUEST: { data: typeof zBadRequestData };
       USER_NOT_FOUND_ERROR: typeof UserNotFoundError;
       FORBIDDEN: typeof PermissionDenied;
     };
@@ -59,8 +63,8 @@ describe("effectErrorMap types", () => {
     type ErrorUnion = EffectErrorMapToUnion<TestErrorMap>;
 
     // The union should include ORPCError for traditional and tagged error instances for classes
-    expectTypeOf<ErrorUnion>().toMatchTypeOf<
-      | ORPCError<"BAD_REQUEST", unknown>
+    expectTypeOf<ErrorUnion>().toExtend<
+      | ORPCError<"BAD_REQUEST", typeof zBadRequestData>
       | ORPCTaggedErrorInstance<"UserNotFoundError", "USER_NOT_FOUND_ERROR">
       | ORPCTaggedErrorInstance<"PermissionDenied", "FORBIDDEN">
     >();

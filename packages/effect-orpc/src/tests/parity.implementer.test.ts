@@ -43,7 +43,7 @@ describe("parity: @orpc/server implementer.test-d.ts", () => {
         rootImplementer.$config({
           initialInputValidationIndex: Number.NEGATIVE_INFINITY,
         }),
-      ).toMatchTypeOf<
+      ).toExtend<
         EffectImplementer<
           typeof typedContract,
           Record<never, never>,
@@ -110,7 +110,7 @@ describe("parity: @orpc/server implementer.test-d.ts", () => {
         BaseMeta
       >;
 
-      expectTypeOf(implementer.use(mid)).toMatchTypeOf<
+      expectTypeOf(implementer.use(mid)).toExtend<
         EffectImplementerInternal<
           typeof typedContract,
           InitialContext & { cacheable?: boolean },
@@ -178,10 +178,10 @@ describe("parity: @orpc/server implementer.test-d.ts", () => {
       never
     >;
 
-    expectTypeOf(implementer.ping).toMatchTypeOf<ExpectedPing>();
-    expectTypeOf(implementer.nested.ping).toMatchTypeOf<ExpectedPing>();
-    expectTypeOf(implementer.pong).toMatchTypeOf<ExpectedPong>();
-    expectTypeOf(implementer.nested.pong).toMatchTypeOf<ExpectedPong>();
+    expectTypeOf(implementer.ping).toExtend<ExpectedPing>();
+    expectTypeOf(implementer.nested.ping).toExtend<ExpectedPing>();
+    expectTypeOf(implementer.pong).toExtend<ExpectedPong>();
+    expectTypeOf(implementer.nested.pong).toExtend<ExpectedPong>();
   });
 
   it("procedure .use preserves the leaf error map", () => {

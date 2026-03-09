@@ -79,7 +79,7 @@ describe("parity: @orpc/contract builder-variants.test-d.ts", () => {
       ).toBeObject();
       expectTypeOf(builder.meta({ log: true })).toBeObject();
       expectTypeOf(builder.route({ method: "GET" })).toBeObject();
-      expectTypeOf(builder.output(generalSchema)).toMatchTypeOf<
+      expectTypeOf(builder.output(generalSchema)).toExtend<
         EffectContractProcedureBuilderWithInputOutput<
           typeof inputSchema,
           typeof generalSchema,
@@ -113,7 +113,7 @@ describe("parity: @orpc/contract builder-variants.test-d.ts", () => {
       ).toBeObject();
       expectTypeOf(builder.meta({ log: true })).toBeObject();
       expectTypeOf(builder.route({ method: "GET" })).toBeObject();
-      expectTypeOf(builder.input(generalSchema)).toMatchTypeOf<
+      expectTypeOf(builder.input(generalSchema)).toExtend<
         EffectContractProcedureBuilderWithInputOutput<
           typeof generalSchema,
           typeof outputSchema,
@@ -172,10 +172,10 @@ describe("parity: @orpc/contract builder-variants.test-d.ts", () => {
       expectTypeOf(
         builder.errors({ INVALID: { message: "invalid" } }),
       ).toBeObject();
-      expectTypeOf(builder.prefix("/api")).toMatchTypeOf<
+      expectTypeOf(builder.prefix("/api")).toExtend<
         EffectContractRouterBuilder<typeof baseErrorMap, BaseMeta>
       >();
-      expectTypeOf(builder.tag("tag1", "tag2")).toMatchTypeOf<
+      expectTypeOf(builder.tag("tag1", "tag2")).toExtend<
         EffectContractRouterBuilder<typeof baseErrorMap, BaseMeta>
       >();
       expectTypeOf(builder.router({ ping, pong })).toExtend<{

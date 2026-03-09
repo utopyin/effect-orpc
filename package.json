@@ -11,6 +11,7 @@
     "type:check": "bun run --cwd packages/effect-orpc type:check",
     "lint:check": "oxlint",
     "format:check": "oxfmt --check",
+    "fix": "bun run format && oxlint --fix",
     "check": "bun run format:check && bun run lint:check && bun run type:check",
     "format": "oxfmt",
     "test": "bun run --cwd packages/effect-orpc test",

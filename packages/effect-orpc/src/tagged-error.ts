@@ -15,7 +15,6 @@ import type {
   ErrorMapItem,
   InferSchemaOutput,
 } from "@orpc/contract";
-import type { ORPCErrorConstructorMap } from "@orpc/server";
 import type { MaybeOptionalOptions } from "@orpc/shared";
 import { resolveMaybeOptionalOptions } from "@orpc/shared";
 import type { Pipeable } from "effect";
@@ -433,8 +432,29 @@ export type EffectErrorMapToUnion<T extends EffectErrorMap> = {
 /**
  * Constructor map for EffectErrorMap - provides typed error constructors for handlers.
  */
-export type EffectErrorConstructorMap<T extends EffectErrorMap> =
-  ORPCErrorConstructorMap<EffectErrorMapToErrorMap<T>>;
+type EffectErrorConstructor<
+  TCode extends ORPCErrorCode,
+  TItem,
+> = TItem extends AnyORPCTaggedErrorClass
+  ? (...args: ConstructorParameters<TItem>) => InstanceType<TItem>
+  : TItem extends { data?: infer TSchema extends AnySchema }
+    ? (
+        ...rest: MaybeOptionalOptions<
+          Omit<
+            ORPCErrorOptions<InferSchemaOutput<TSchema>>,
+            "defined" | "status"
+          >
+        >
+      ) => ORPCError<TCode, InferSchemaOutput<TSchema>>
+    : (
+        ...rest: MaybeOptionalOptions<
+          Omit<ORPCErrorOptions<unknown>, "defined" | "status">
+        >
+      ) => ORPCError<TCode, unknown>;
+
+export type EffectErrorConstructorMap<T extends EffectErrorMap> = {
+  [K in Extract<keyof T, ORPCErrorCode>]: EffectErrorConstructor<K, T[K]>;
+};
 
 /**
  * Creates an error constructor map from an EffectErrorMap.
@@ -478,7 +498,7 @@ export function createEffectErrorConstructorMap<T extends EffectErrorMap>(
     },
   });
 
-  return proxy as EffectErrorConstructorMap<T>;
+  return proxy as unknown as EffectErrorConstructorMap<T>;
 }
 
 /**

@@ -1,9 +1,10 @@
 {
-  "name": "effect-orpc-example-hono-request-context",
+  "name": "effect-orpc-example-hono",
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "bun --watch index.ts"
+    "start": "bun --watch index.ts",
+    "test": "vitest *.test.ts"
   },
   "dependencies": {
     "@effect/opentelemetry": "^4.0.0-beta.27",
@@ -12,6 +13,8 @@
     "@opentelemetry/sdk-trace-base": "^2.5.0",
     "@opentelemetry/sdk-trace-node": "^2.5.0",
     "@opentelemetry/sdk-trace-web": "^2.5.0",
+    "@orpc/client": "^1.13.4",
+    "@orpc/contract": "^1.13.4",
     "@orpc/openapi": "^1.13.4",
     "@orpc/server": "^1.13.4",
     "@orpc/zod": "^1.13.4",
@@ -20,6 +23,7 @@
     "effect-orpc": "workspace:*",
     "hono": "^4.11.4",
     "typescript": "^5.9.3",
+    "vitest": "catalog:",
     "zod": "^4.3.5"
   }
 }

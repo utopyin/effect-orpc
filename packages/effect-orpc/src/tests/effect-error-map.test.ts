@@ -50,8 +50,12 @@ describe("effectErrorMap types", () => {
   });
 
   it("should infer correct union type from EffectErrorMap", () => {
+    const zBadRequestData = z.object({
+      status: z.number(),
+      message: z.string(),
+    });
     type TestErrorMap = {
-      BAD_REQUEST: { status?: number; message?: string };
+      BAD_REQUEST: { data: typeof zBadRequestData };
       USER_NOT_FOUND_ERROR: typeof UserNotFoundError;
       FORBIDDEN: typeof PermissionDenied;
     };
@@ -59,8 +63,8 @@ describe("effectErrorMap types", () => {
     type ErrorUnion = EffectErrorMapToUnion<TestErrorMap>;
 
     // The union should include ORPCError for traditional and tagged error instances for classes
-    expectTypeOf<ErrorUnion>().toMatchTypeOf<
-      | ORPCError<"BAD_REQUEST", unknown>
+    expectTypeOf<ErrorUnion>().toExtend<
+      | ORPCError<"BAD_REQUEST", typeof zBadRequestData>
       | ORPCTaggedErrorInstance<"UserNotFoundError", "USER_NOT_FOUND_ERROR">
       | ORPCTaggedErrorInstance<"PermissionDenied", "FORBIDDEN">
     >();
@@ -84,6 +88,21 @@ describe("isORPCTaggedErrorClass", () => {
 });
 
 describe("createEffectErrorConstructorMap", () => {
+  it("preserves declaration keys even when a tagged error class uses a different code", () => {
+    const errorMap = {
+      NOT_FOUND: UserNotFoundError,
+    } satisfies EffectErrorMap;
+
+    const constructorMap = createEffectErrorConstructorMap(errorMap);
+    const userNotFoundError = constructorMap.NOT_FOUND({
+      data: { userId: "123" },
+    });
+
+    expect(constructorMap).not.toHaveProperty("USER_NOT_FOUND_ERROR");
+    expect(userNotFoundError).toBeInstanceOf(UserNotFoundError);
+    expect(userNotFoundError.code).toBe("USER_NOT_FOUND_ERROR");
+  });
+
   it("should pass through tagged error classes", () => {
     const errorMap = {
       USER_NOT_FOUND_ERROR: UserNotFoundError,

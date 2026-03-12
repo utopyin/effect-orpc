@@ -22,7 +22,6 @@ import type {
   ProcedureHandlerOptions,
   RouterBuilder,
 } from "@orpc/server";
-import type { Promisable } from "@orpc/shared";
 import type { Effect, ManagedRuntime } from "effect";
 
 import type {
@@ -60,21 +59,6 @@ export interface EffectBuilderDef<
    */
   effectErrorMap: TEffectErrorMap;
 }
-
-export type NonEffectProcedureHandler<
-  TCurrentContext extends Context,
-  TInput,
-  THandlerOutput,
-  TEffectErrorMap extends EffectErrorMap,
-  TMeta extends Meta,
-> = (
-  opt: ProcedureHandlerOptions<
-    TCurrentContext,
-    TInput,
-    EffectErrorConstructorMap<TEffectErrorMap>,
-    TMeta
-  >,
-) => Promisable<THandlerOutput>;
 
 /**
  * Extended procedure definition that includes the Effect ManagedRuntime.

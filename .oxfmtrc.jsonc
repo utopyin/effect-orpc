@@ -14,12 +14,8 @@
   "bracketSameLine": false,
   "arrowParens": "always",
   "endOfLine": "lf",
-  "experimentalSortPackageJson": true,
-  "experimentalSortImports": {
-    "ignoreCase": true,
-    "newlinesBetween": true,
-    "order": "asc",
-  },
+  "sortPackageJson": true,
+  "sortImports": { "ignoreCase": true },
   "embeddedLanguageFormatting": "auto",
   "ignorePatterns": [".changeset/**"],
 }

@@ -8,25 +8,19 @@ import type {
   Route,
   Schema,
 } from "@orpc/contract";
-import {
-  mergeMeta,
-  mergePrefix,
-  mergeRoute,
-  mergeTags,
-  ORPCError,
-} from "@orpc/contract";
+import { mergeMeta, mergePrefix, mergeRoute, mergeTags } from "@orpc/contract";
 import type {
   AnyMiddleware,
   BuilderConfig,
   BuilderDef,
   Context,
+  DecoratedMiddleware,
   Lazy,
   MapInputMiddleware,
   MergedCurrentContext,
   MergedInitialContext,
   Middleware,
   ProcedureHandler,
-  ProcedureHandlerOptions,
   Router,
 } from "@orpc/server";
 import {
@@ -37,28 +31,17 @@ import {
   lazy,
 } from "@orpc/server";
 import type { IntersectPick } from "@orpc/shared";
-import {
-  Cause,
-  Effect,
-  Exit,
-  ManagedRuntime,
-  Result,
-  ServiceMap,
-} from "effect";
+import type { ManagedRuntime } from "effect";
 
 import { enhanceEffectRouter } from "./effect-enhance-router";
 import { EffectDecoratedProcedure } from "./effect-procedure";
-import { getCurrentServices } from "./service-context-bridge";
+import { createEffectProcedureHandler } from "./effect-runtime";
 import type {
   EffectErrorConstructorMap,
   EffectErrorMap,
   MergedEffectErrorMap,
 } from "./tagged-error";
-import {
-  createEffectErrorConstructorMap,
-  effectErrorMapToErrorMap,
-  isORPCTaggedError,
-} from "./tagged-error";
+import { effectErrorMapToErrorMap } from "./tagged-error";
 import type {
   AnyBuilderLike,
   EffectBuilderDef,
@@ -103,55 +86,6 @@ export function addSpanStackTrace(): () => string | undefined {
       }
     }
   };
-}
-
-function toORPCErrorFromCause(
-  cause: Cause.Cause<unknown>,
-): ORPCError<string, unknown> {
-  if (Cause.hasFails(cause)) {
-    const reason = Cause.findFail(cause);
-    if (Result.isFailure(reason)) {
-      return new ORPCError("INTERNAL_SERVER_ERROR");
-    }
-
-    const error = reason.success.error;
-    if (isORPCTaggedError(error)) {
-      return error.toORPCError();
-    }
-    if (error instanceof ORPCError) {
-      return error;
-    }
-
-    return new ORPCError("INTERNAL_SERVER_ERROR", {
-      cause: error,
-    });
-  }
-
-  if (Cause.hasDies(cause)) {
-    const reason = Cause.findDie(cause);
-    if (Result.isFailure(reason)) {
-      return new ORPCError("INTERNAL_SERVER_ERROR", {
-        cause: new Error(`Died by unknown reason`),
-      });
-    }
-    return new ORPCError("INTERNAL_SERVER_ERROR", {
-      cause: reason.success.defect,
-    });
-  }
-
-  if (Cause.hasInterrupts(cause)) {
-    const reason = Cause.findInterrupt(cause);
-    if (Result.isFailure(reason)) {
-      return new ORPCError("INTERNAL_SERVER_ERROR", {
-        cause: new Error(`Unknown fiber got interrupted`),
-      });
-    }
-    return new ORPCError("INTERNAL_SERVER_ERROR", {
-      cause: new Error(`${reason.success.fiberId} got interrupted`),
-    });
-  }
-
-  return new ORPCError("INTERNAL_SERVER_ERROR");
 }
 
 /**
@@ -359,6 +293,35 @@ export class EffectBuilder<
       ...this["~effect"],
       inputSchema: initialInputSchema,
     });
+  }
+
+  /**
+   * Creates a middleware.
+   *
+   * @see {@link https://orpc.dev/docs/middleware Middleware Docs}
+   */
+  middleware<
+    UOutContext extends IntersectPick<TCurrentContext, UOutContext>,
+    TInput,
+    TOutput = any,
+  >(
+    middleware: Middleware<
+      TInitialContext,
+      UOutContext,
+      TInput,
+      TOutput,
+      EffectErrorConstructorMap<TEffectErrorMap>,
+      TMeta
+    >,
+  ): DecoratedMiddleware<
+    TInitialContext,
+    UOutContext,
+    TInput,
+    TOutput,
+    any,
+    TMeta
+  > {
+    return decorateMiddleware(middleware);
   }
 
   /**
@@ -658,45 +621,13 @@ export class EffectBuilder<
     return new EffectDecoratedProcedure({
       ...this["~effect"],
       handler: async (opts) => {
-        const effectOpts: ProcedureHandlerOptions<
-          TCurrentContext,
-          InferSchemaOutput<TInputSchema>,
-          EffectErrorConstructorMap<TEffectErrorMap>,
-          TMeta
-        > = {
-          context: opts.context,
-          input: opts.input,
-          path: opts.path,
-          procedure: opts.procedure,
-          signal: opts.signal,
-          lastEventId: opts.lastEventId,
-          errors: createEffectErrorConstructorMap(
-            this["~effect"].effectErrorMap,
-          ),
-        };
-        const spanName = spanConfig?.name ?? opts.path.join(".");
-        const captureStackTrace =
-          spanConfig?.captureStackTrace ?? defaultCaptureStackTrace;
-        const resolver = Effect.fnUntraced(effectFn);
-        const tracedEffect = Effect.withSpan(resolver(effectOpts), spanName, {
-          captureStackTrace,
-        });
-        const parentServices = getCurrentServices();
-        const exit = parentServices
-          ? await Effect.runPromiseExitWith(
-              ServiceMap.merge(await runtime.services(), parentServices),
-            )(tracedEffect, {
-              signal: opts.signal,
-            })
-          : await runtime.runPromiseExit(tracedEffect, {
-              signal: opts.signal,
-            });
-
-        if (Exit.isFailure(exit)) {
-          throw toORPCErrorFromCause(exit.cause);
-        }
-
-        return exit.value;
+        return createEffectProcedureHandler({
+          runtime,
+          effectErrorMap: this["~effect"].effectErrorMap,
+          effectFn,
+          spanConfig,
+          defaultCaptureStackTrace,
+        })(opts as any);
       },
     });
   }

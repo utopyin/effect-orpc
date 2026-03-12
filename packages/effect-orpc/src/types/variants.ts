@@ -20,6 +20,7 @@ import type {
   MergedCurrentContext,
   MergedInitialContext,
   Middleware,
+  ProcedureHandler,
   Router,
 } from "@orpc/server";
 import type { IntersectPick } from "@orpc/shared";
@@ -201,12 +202,11 @@ export interface EffectBuilderWithMiddlewares<
    * @see {@link https://orpc.dev/docs/procedure Procedure Docs}
    */
   "handler"<UFuncOutput>(
-    handler: EffectProcedureHandler<
+    handler: ProcedureHandler<
       TCurrentContext,
       unknown,
       UFuncOutput,
-      TEffectErrorMap,
-      TRequirementsProvided,
+      EffectErrorMapToErrorMap<TEffectErrorMap>,
       TMeta
     >,
   ): EffectDecoratedProcedure<
@@ -476,12 +476,11 @@ export interface EffectProcedureBuilder<
    * @see {@link https://orpc.dev/docs/procedure Procedure Docs}
    */
   "handler"<UFuncOutput>(
-    handler: EffectProcedureHandler<
+    handler: ProcedureHandler<
       TCurrentContext,
       unknown,
       UFuncOutput,
-      TEffectErrorMap,
-      TRequirementsProvided,
+      EffectErrorMapToErrorMap<TEffectErrorMap>,
       TMeta
     >,
   ): EffectDecoratedProcedure<
@@ -509,6 +508,19 @@ export interface EffectProcedureBuilder<
     TCurrentContext,
     TInputSchema,
     Schema<UFuncOutput, UFuncOutput>,
+    TEffectErrorMap,
+    TMeta,
+    TRequirementsProvided,
+    TRuntimeError
+  >;
+
+  "traced"(
+    spanName: string,
+  ): EffectProcedureBuilder<
+    TInitialContext,
+    TCurrentContext,
+    TInputSchema,
+    TOutputSchema,
     TEffectErrorMap,
     TMeta,
     TRequirementsProvided,
@@ -694,12 +706,11 @@ export interface EffectProcedureBuilderWithInput<
    * @see {@link https://orpc.dev/docs/procedure Procedure Docs}
    */
   "handler"<UFuncOutput>(
-    handler: EffectProcedureHandler<
+    handler: ProcedureHandler<
       TCurrentContext,
       InferSchemaOutput<TInputSchema>,
       UFuncOutput,
-      TEffectErrorMap,
-      TRequirementsProvided,
+      EffectErrorMapToErrorMap<TEffectErrorMap>,
       TMeta
     >,
   ): EffectDecoratedProcedure<
@@ -791,7 +802,7 @@ export interface EffectProcedureBuilderWithOutput<
     TCurrentContext,
     TInputSchema,
     TOutputSchema,
-    TEffectErrorMap,
+    MergedEffectErrorMap<TEffectErrorMap, U>,
     TMeta,
     TRequirementsProvided,
     TRuntimeError
@@ -891,12 +902,11 @@ export interface EffectProcedureBuilderWithOutput<
    * @see {@link https://orpc.dev/docs/procedure Procedure Docs}
    */
   "handler"(
-    handler: EffectProcedureHandler<
+    handler: ProcedureHandler<
       TCurrentContext,
       unknown,
       InferSchemaInput<TOutputSchema>,
-      TEffectErrorMap,
-      TRequirementsProvided,
+      EffectErrorMapToErrorMap<TEffectErrorMap>,
       TMeta
     >,
   ): EffectDecoratedProcedure<
@@ -1104,12 +1114,11 @@ export interface EffectProcedureBuilderWithInputOutput<
    * @see {@link https://orpc.dev/docs/procedure Procedure Docs}
    */
   "handler"(
-    handler: EffectProcedureHandler<
+    handler: ProcedureHandler<
       TCurrentContext,
       InferSchemaOutput<TInputSchema>,
       InferSchemaInput<TOutputSchema>,
-      TEffectErrorMap,
-      TRequirementsProvided,
+      EffectErrorMapToErrorMap<TEffectErrorMap>,
       TMeta
     >,
   ): EffectDecoratedProcedure<

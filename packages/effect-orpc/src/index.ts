@@ -1,3 +1,18 @@
+export { implementEffect } from "./contract";
+export type {
+  EffectImplementer,
+  EffectImplementerInternal,
+  EffectProcedureImplementer,
+} from "./contract";
+export { eoc } from "./eoc";
+export type {
+  EffectContractBuilder,
+  EffectContractProcedureBuilder,
+  EffectContractProcedureBuilderWithInput,
+  EffectContractProcedureBuilderWithInputOutput,
+  EffectContractProcedureBuilderWithOutput,
+  EffectContractRouterBuilder,
+} from "./eoc";
 export {
   addSpanStackTrace,
   EffectBuilder,
@@ -40,10 +55,10 @@ export type {
   EffectProcedureHandler,
   EffectRouterBuilder,
   EffectSpanConfig,
-  InferBuilderInitialContext,
   InferBuilderCurrentContext,
-  InferBuilderInputSchema,
-  InferBuilderOutputSchema,
   InferBuilderErrorMap,
+  InferBuilderInitialContext,
+  InferBuilderInputSchema,
   InferBuilderMeta,
+  InferBuilderOutputSchema,
 } from "./types";

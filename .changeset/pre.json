@@ -1,0 +1,12 @@
+{
+  "mode": "pre",
+  "tag": "effect-v4",
+  "initialVersions": {
+    "effect-orpc": "0.1.2"
+  },
+  "changesets": [
+    "dull-spiders-smash",
+    "fluffy-times-shave",
+    "silly-doodles-cover"
+  ]
+}

@@ -209,7 +209,8 @@ describe("class ORPCTaggedError", () => {
 
       expect(Exit.isFailure(result)).toBe(true);
       if (Exit.isFailure(result)) {
-        const error = result.cause._tag === "Fail" ? result.cause.error : null;
+        const reason = result.cause.reasons[0];
+        const error = reason?._tag === "Fail" ? reason.error : null;
         expect(error).toBeInstanceOf(ValidationError);
         expect((error as ValidationError).data).toEqual({ fields: ["email"] });
       }

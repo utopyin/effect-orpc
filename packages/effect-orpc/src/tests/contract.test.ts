@@ -1,26 +1,28 @@
 import { oc, type InferSchemaOutput } from "@orpc/contract";
 import { call, ORPCError, type Router } from "@orpc/server";
-import { Effect, FiberRef, Layer, ManagedRuntime } from "effect";
+import { Effect, Layer, ManagedRuntime, ServiceMap } from "effect";
 import { describe, expect, expectTypeOf, it } from "vitest";
 import z from "zod";
 
 import { eoc, implementEffect, ORPCTaggedError } from "../index";
 import { withFiberContext } from "../node";
 
-class Counter extends Effect.Tag("Counter")<
+class Counter extends ServiceMap.Service<
   Counter,
   {
     readonly increment: (n: number) => Effect.Effect<number>;
   }
->() {}
-
-const requestIdRef = FiberRef.unsafeMake("missing");
-
-const runtime = ManagedRuntime.make(
-  Layer.succeed(Counter, {
+>()("Counter") {
+  static readonly layer = Layer.succeed(this, {
     increment: (n: number) => Effect.succeed(n + 1),
-  }),
-);
+  });
+}
+
+const RequestId = ServiceMap.Reference<string>("RequestId", {
+  defaultValue: () => "missing",
+});
+
+const runtime = ManagedRuntime.make(Counter.layer);
 
 const contract = {
   users: {
@@ -41,7 +43,7 @@ describe("implementEffect", () => {
 
     const procedure = oe.users.list.effect(function* ({ input }) {
       const counter = yield* Counter;
-      const requestId = yield* FiberRef.get(requestIdRef);
+      const requestId = yield* RequestId;
 
       return {
         next: yield* counter.increment(input.amount),
@@ -50,10 +52,11 @@ describe("implementEffect", () => {
     });
 
     const result = await Effect.runPromise(
-      Effect.gen(function* () {
-        yield* FiberRef.set(requestIdRef, "req-123");
-        return yield* withFiberContext(() => call(procedure, { amount: 2 }));
-      }),
+      Effect.provideService(
+        withFiberContext(() => call(procedure, { amount: 2 })),
+        RequestId,
+        "req-123",
+      ),
     );
 
     expect(result).toEqual({
@@ -72,19 +75,18 @@ describe("implementEffect", () => {
 
           return {
             next: yield* counter.increment(input.amount),
-            requestId: yield* FiberRef.get(requestIdRef),
+            requestId: yield* RequestId,
           };
         }),
       },
     });
 
     const result = await Effect.runPromise(
-      Effect.gen(function* () {
-        yield* FiberRef.set(requestIdRef, "req-456");
-        return yield* withFiberContext(() =>
-          call(router.users.list, { amount: 4 }),
-        );
-      }),
+      Effect.provideService(
+        withFiberContext(() => call(router.users.list, { amount: 4 })),
+        RequestId,
+        "req-456",
+      ),
     );
 
     expect(result).toEqual({

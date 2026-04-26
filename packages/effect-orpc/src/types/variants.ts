@@ -220,6 +220,13 @@ export interface EffectBuilderWithMiddlewares<
     TRuntimeError
   >;
 
+  /**
+   * Defines the handler of the procedure using an Effect.
+   * The Effect is executed using the ManagedRuntime provided during builder creation.
+   * The effect is automatically wrapped with `Effect.withSpan`.
+   *
+   * @see {@link https://orpc.dev/docs/procedure Procedure Docs}
+   */
   "effect"<UFuncOutput>(
     effectFn: EffectProcedureHandler<
       TCurrentContext,
@@ -240,6 +247,14 @@ export interface EffectBuilderWithMiddlewares<
     TRuntimeError
   >;
 
+  /**
+   * Adds a traceable span to the procedure for telemetry.
+   * The span name is used for Effect tracing via `Effect.withSpan`.
+   * Stack trace is captured at the call site for better error reporting.
+   *
+   * @param spanName - The name of the span for telemetry (e.g., 'users.getUser')
+   * @returns A traced procedure builder
+   */
   "traced"(
     spanName: string,
   ): EffectProcedureBuilderWithInput<
@@ -494,6 +509,13 @@ export interface EffectProcedureBuilder<
     TRuntimeError
   >;
 
+  /**
+   * Defines the handler of the procedure using an Effect.
+   * The Effect is executed using the ManagedRuntime provided during builder creation.
+   * The effect is automatically wrapped with `Effect.withSpan`.
+   *
+   * @see {@link https://orpc.dev/docs/procedure Procedure Docs}
+   */
   "effect"<UFuncOutput>(
     effectFn: EffectProcedureHandler<
       TCurrentContext,
@@ -514,6 +536,14 @@ export interface EffectProcedureBuilder<
     TRuntimeError
   >;
 
+  /**
+   * Adds a traceable span to the procedure for telemetry.
+   * The span name is used for Effect tracing via `Effect.withSpan`.
+   * Stack trace is captured at the call site for better error reporting.
+   *
+   * @param spanName - The name of the span for telemetry (e.g., 'users.getUser')
+   * @returns A traced procedure builder
+   */
   "traced"(
     spanName: string,
   ): EffectProcedureBuilder<
@@ -724,6 +754,13 @@ export interface EffectProcedureBuilderWithInput<
     TRuntimeError
   >;
 
+  /**
+   * Defines the handler of the procedure using an Effect.
+   * The Effect is executed using the ManagedRuntime provided during builder creation.
+   * The effect is automatically wrapped with `Effect.withSpan`.
+   *
+   * @see {@link https://orpc.dev/docs/procedure Procedure Docs}
+   */
   "effect"<UFuncOutput>(
     effectFn: EffectProcedureHandler<
       TCurrentContext,
@@ -744,6 +781,14 @@ export interface EffectProcedureBuilderWithInput<
     TRuntimeError
   >;
 
+  /**
+   * Adds a traceable span to the procedure for telemetry.
+   * The span name is used for Effect tracing via `Effect.withSpan`.
+   * Stack trace is captured at the call site for better error reporting.
+   *
+   * @param spanName - The name of the span for telemetry (e.g., 'users.getUser')
+   * @returns A traced procedure builder
+   */
   "traced"(
     spanName: string,
   ): EffectProcedureBuilderWithInput<
@@ -920,6 +965,13 @@ export interface EffectProcedureBuilderWithOutput<
     TRuntimeError
   >;
 
+  /**
+   * Defines the handler of the procedure using an Effect.
+   * The Effect is executed using the ManagedRuntime provided during builder creation.
+   * The effect is automatically wrapped with `Effect.withSpan`.
+   *
+   * @see {@link https://orpc.dev/docs/procedure Procedure Docs}
+   */
   "effect"(
     effectFn: EffectProcedureHandler<
       TCurrentContext,
@@ -940,6 +992,14 @@ export interface EffectProcedureBuilderWithOutput<
     TRuntimeError
   >;
 
+  /**
+   * Adds a traceable span to the procedure for telemetry.
+   * The span name is used for Effect tracing via `Effect.withSpan`.
+   * Stack trace is captured at the call site for better error reporting.
+   *
+   * @param spanName - The name of the span for telemetry (e.g., 'users.getUser')
+   * @returns A traced procedure builder
+   */
   "traced"(
     spanName: string,
   ): EffectProcedureBuilderWithInput<
@@ -1132,6 +1192,13 @@ export interface EffectProcedureBuilderWithInputOutput<
     TRuntimeError
   >;
 
+  /**
+   * Defines the handler of the procedure using an Effect.
+   * The Effect is executed using the ManagedRuntime provided during builder creation.
+   * The effect is automatically wrapped with `Effect.withSpan`.
+   *
+   * @see {@link https://orpc.dev/docs/procedure Procedure Docs}
+   */
   "effect"(
     effectFn: EffectProcedureHandler<
       TCurrentContext,
@@ -1152,6 +1219,14 @@ export interface EffectProcedureBuilderWithInputOutput<
     TRuntimeError
   >;
 
+  /**
+   * Adds a traceable span to the procedure for telemetry.
+   * The span name is used for Effect tracing via `Effect.withSpan`.
+   * Stack trace is captured at the call site for better error reporting.
+   *
+   * @param spanName - The name of the span for telemetry (e.g., 'users.getUser')
+   * @returns A traced procedure builder
+   */
   "traced"(
     spanName: string,
   ): EffectProcedureBuilderWithInput<

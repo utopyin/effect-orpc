@@ -2,55 +2,32 @@ import type {
   AnySchema,
   ContractRouter,
   ErrorMap,
-  HTTPPath,
-  InferSchemaOutput,
   Meta,
-  Route,
   Schema,
 } from "@orpc/contract";
-import { mergeMeta, mergePrefix, mergeRoute, mergeTags } from "@orpc/contract";
-import type {
-  AnyMiddleware,
-  BuilderConfig,
-  BuilderDef,
-  Context,
-  DecoratedMiddleware,
-  Lazy,
-  MapInputMiddleware,
-  MergedCurrentContext,
-  MergedInitialContext,
-  Middleware,
-  ProcedureHandler,
-  Router,
-} from "@orpc/server";
-import {
-  addMiddleware,
-  Builder,
-  decorateMiddleware,
-  fallbackConfig,
-  lazy,
-} from "@orpc/server";
-import type { IntersectPick } from "@orpc/shared";
+import type { Context, Router } from "@orpc/server";
+import { Builder, fallbackConfig, lazy } from "@orpc/server";
 import type { ManagedRuntime } from "effect";
 
 import { enhanceEffectRouter } from "./effect-enhance-router";
 import { EffectDecoratedProcedure } from "./effect-procedure";
 import { createEffectProcedureHandler } from "./effect-runtime";
-import type {
-  EffectErrorConstructorMap,
-  EffectErrorMap,
-  MergedEffectErrorMap,
-} from "./tagged-error";
+import {
+  createNodeProxy,
+  unhandled,
+  type NodeProxyContext,
+} from "./extension/create-node-proxy";
+import {
+  attachEffectState,
+  getEffectErrorMap,
+  unwrapEffectUpstream,
+  type EffectProxyTarget,
+} from "./extension/state";
+import type { EffectErrorMap, MergedEffectErrorMap } from "./tagged-error";
 import { effectErrorMapToErrorMap } from "./tagged-error";
 import type {
   AnyBuilderLike,
   EffectBuilderDef,
-  EffectErrorMapToErrorMap,
-  EffectProcedureBuilderWithInput,
-  EffectProcedureBuilderWithOutput,
-  EffectProcedureHandler,
-  EffectRouterBuilder,
-  EnhancedEffectRouter,
   InferBuilderCurrentContext,
   InferBuilderErrorMap,
   InferBuilderInitialContext,
@@ -58,12 +35,215 @@ import type {
   InferBuilderMeta,
   InferBuilderOutputSchema,
 } from "./types";
+import type { EffectBuilderSurface } from "./types/effect-builder-surface";
+
+const builderVirtualDescriptors = {
+  "~effect": { enumerable: true },
+  effect: { enumerable: false },
+  errors: { enumerable: false },
+  handler: { enumerable: false },
+  lazy: { enumerable: false },
+  router: { enumerable: false },
+  traced: { enumerable: false },
+} as const;
+
+const builderVirtualKeys = [
+  "~effect",
+  "errors",
+  "effect",
+  "traced",
+  "handler",
+  "router",
+  "lazy",
+] as const;
+
+type EffectBuilderTarget = EffectBuilder<
+  any,
+  any,
+  any,
+  any,
+  any,
+  any,
+  any,
+  any
+> &
+  EffectProxyTarget<AnyBuilderLike>;
+
+function isBuilderLike(value: unknown): value is AnyBuilderLike {
+  return typeof value === "object" && value !== null && "~orpc" in value;
+}
+
+function getOrCreateVirtualMethod<T>(
+  context: NodeProxyContext<EffectBuilderTarget, AnyBuilderLike>,
+  prop: PropertyKey,
+  factory: () => T,
+): T {
+  const cache = context.methodCache;
+  if (cache.has(prop)) {
+    return cache.get(prop) as T;
+  }
+
+  const value = factory();
+  cache.set(prop, value);
+  return value;
+}
+
+function getEffectBuilderDef(
+  context: NodeProxyContext<EffectBuilderTarget, AnyBuilderLike>,
+): EffectBuilderDef<any, any, any, any, any, any> {
+  return {
+    ...context.upstream["~orpc"],
+    effectErrorMap: context.state.effectErrorMap,
+    runtime: context.state.runtime,
+    spanConfig: context.state.spanConfig,
+  };
+}
+
+function wrapBuilderLike(
+  builder: AnyBuilderLike,
+  state: NodeProxyContext<EffectBuilderTarget, AnyBuilderLike>["state"],
+): EffectBuilder<any, any, any, any, any, any, any, any> {
+  return new EffectBuilder(
+    {
+      ...builder["~orpc"],
+      effectErrorMap: state.effectErrorMap,
+      runtime: state.runtime,
+      spanConfig: state.spanConfig,
+    },
+    unwrapEffectUpstream(builder),
+  );
+}
+
+function createEffectBuilderProxy(
+  target: EffectBuilderTarget,
+): EffectBuilderTarget {
+  return createNodeProxy<EffectBuilderTarget, AnyBuilderLike>(target, {
+    getVirtual(context, prop) {
+      const effectDef = getEffectBuilderDef(context);
+      if (prop === "~effect") {
+        return getEffectBuilderDef(context);
+      }
+
+      const { upstream: source, state } = context;
+
+      switch (prop) {
+        case "errors":
+          return getOrCreateVirtualMethod(context, prop, () => {
+            return <U extends EffectErrorMap>(errors: U) => {
+              const nextEffectErrorMap: MergedEffectErrorMap<
+                typeof state.effectErrorMap,
+                U
+              > = {
+                ...state.effectErrorMap,
+                ...errors,
+              };
+              const nextBuilder: AnyBuilderLike = Reflect.apply(
+                Reflect.get(source, "errors", source),
+                source,
+                [effectErrorMapToErrorMap(errors)],
+              );
+
+              return wrapBuilderLike(nextBuilder, {
+                ...state,
+                effectErrorMap: nextEffectErrorMap,
+              });
+            };
+          });
+        case "effect":
+          return getOrCreateVirtualMethod(context, prop, () => {
+            return (
+              effectFn: Parameters<
+                EffectBuilderSurface<
+                  any,
+                  any,
+                  any,
+                  any,
+                  any,
+                  any,
+                  any,
+                  any
+                >["effect"]
+              >[0],
+            ) => {
+              const defaultCaptureStackTrace = addSpanStackTrace();
+              return new EffectDecoratedProcedure({
+                ...effectDef,
+                handler: async (opts) => {
+                  return createEffectProcedureHandler({
+                    defaultCaptureStackTrace,
+                    effectErrorMap: state.effectErrorMap,
+                    effectFn,
+                    runtime: state.runtime,
+                    spanConfig: state.spanConfig,
+                  })(opts as any);
+                },
+              });
+            };
+          });
+        case "traced":
+          return getOrCreateVirtualMethod(context, prop, () => {
+            return (spanName: string) =>
+              wrapBuilderLike(source, {
+                ...state,
+                spanConfig: {
+                  captureStackTrace: addSpanStackTrace(),
+                  name: spanName,
+                },
+              });
+          });
+        case "handler":
+          return getOrCreateVirtualMethod(context, prop, () => {
+            return (
+              handler: Parameters<
+                EffectBuilderSurface<
+                  any,
+                  any,
+                  any,
+                  any,
+                  any,
+                  any,
+                  any,
+                  any
+                >["handler"]
+              >[0],
+            ) =>
+              new EffectDecoratedProcedure({
+                ...effectDef,
+                handler,
+              });
+          });
+        case "router":
+          return getOrCreateVirtualMethod(context, prop, () => {
+            return (router: Router<ContractRouter<any>, any>) =>
+              enhanceEffectRouter(router, effectDef) as any;
+          });
+        case "lazy":
+          return getOrCreateVirtualMethod(context, prop, () => {
+            return (
+              loader: () => Promise<{
+                default: Router<ContractRouter<any>, any>;
+              }>,
+            ) => enhanceEffectRouter(lazy(loader), effectDef) as any;
+          });
+        default:
+          return unhandled();
+      }
+    },
+    virtualDescriptors: builderVirtualDescriptors,
+    virtualKeys: builderVirtualKeys,
+    wrapResult(context, _prop, result) {
+      if (!isBuilderLike(result)) {
+        return result;
+      }
+
+      return wrapBuilderLike(result, context.state);
+    },
+  });
+}
 
 /**
  * Captures the stack trace at the call site for better error reporting in spans.
  * This is called at procedure definition time to capture where the procedure was defined.
- *
- * @returns A function that lazily extracts the relevant stack frame
  */
 export function addSpanStackTrace(): () => string | undefined {
   const ErrorConstructor = Error as typeof Error & {
@@ -102,10 +282,66 @@ export class EffectBuilder<
   TMeta extends Meta,
   TRequirementsProvided,
   TRuntimeError,
+> implements EffectBuilderSurface<
+  TInitialContext,
+  TCurrentContext,
+  TInputSchema,
+  TOutputSchema,
+  TEffectErrorMap,
+  TMeta,
+  TRequirementsProvided,
+  TRuntimeError
 > {
-  /**
-   * This property holds the defined options and the effect-specific properties.
-   */
+  declare $config: EffectBuilderSurface<
+    TInitialContext,
+    TCurrentContext,
+    TInputSchema,
+    TOutputSchema,
+    TEffectErrorMap,
+    TMeta,
+    TRequirementsProvided,
+    TRuntimeError
+  >["$config"];
+  declare $context: EffectBuilderSurface<
+    TInitialContext,
+    TCurrentContext,
+    TInputSchema,
+    TOutputSchema,
+    TEffectErrorMap,
+    TMeta,
+    TRequirementsProvided,
+    TRuntimeError
+  >["$context"];
+  declare $meta: EffectBuilderSurface<
+    TInitialContext,
+    TCurrentContext,
+    TInputSchema,
+    TOutputSchema,
+    TEffectErrorMap,
+    TMeta,
+    TRequirementsProvided,
+    TRuntimeError
+  >["$meta"];
+  declare $route: EffectBuilderSurface<
+    TInitialContext,
+    TCurrentContext,
+    TInputSchema,
+    TOutputSchema,
+    TEffectErrorMap,
+    TMeta,
+    TRequirementsProvided,
+    TRuntimeError
+  >["$route"];
+  declare $input: EffectBuilderSurface<
+    TInitialContext,
+    TCurrentContext,
+    TInputSchema,
+    TOutputSchema,
+    TEffectErrorMap,
+    TMeta,
+    TRequirementsProvided,
+    TRuntimeError
+  >["$input"];
   declare "~effect": EffectBuilderDef<
     TInputSchema,
     TOutputSchema,
@@ -114,12 +350,156 @@ export class EffectBuilder<
     TRequirementsProvided,
     TRuntimeError
   >;
-  declare "~orpc": BuilderDef<
+  declare "~orpc": EffectBuilderSurface<
+    TInitialContext,
+    TCurrentContext,
     TInputSchema,
     TOutputSchema,
-    EffectErrorMapToErrorMap<TEffectErrorMap>,
-    TMeta
-  >;
+    TEffectErrorMap,
+    TMeta,
+    TRequirementsProvided,
+    TRuntimeError
+  >["~orpc"];
+  declare middleware: EffectBuilderSurface<
+    TInitialContext,
+    TCurrentContext,
+    TInputSchema,
+    TOutputSchema,
+    TEffectErrorMap,
+    TMeta,
+    TRequirementsProvided,
+    TRuntimeError
+  >["middleware"];
+  declare errors: EffectBuilderSurface<
+    TInitialContext,
+    TCurrentContext,
+    TInputSchema,
+    TOutputSchema,
+    TEffectErrorMap,
+    TMeta,
+    TRequirementsProvided,
+    TRuntimeError
+  >["errors"];
+  declare use: EffectBuilderSurface<
+    TInitialContext,
+    TCurrentContext,
+    TInputSchema,
+    TOutputSchema,
+    TEffectErrorMap,
+    TMeta,
+    TRequirementsProvided,
+    TRuntimeError
+  >["use"];
+  declare meta: EffectBuilderSurface<
+    TInitialContext,
+    TCurrentContext,
+    TInputSchema,
+    TOutputSchema,
+    TEffectErrorMap,
+    TMeta,
+    TRequirementsProvided,
+    TRuntimeError
+  >["meta"];
+  declare route: EffectBuilderSurface<
+    TInitialContext,
+    TCurrentContext,
+    TInputSchema,
+    TOutputSchema,
+    TEffectErrorMap,
+    TMeta,
+    TRequirementsProvided,
+    TRuntimeError
+  >["route"];
+  declare input: EffectBuilderSurface<
+    TInitialContext,
+    TCurrentContext,
+    TInputSchema,
+    TOutputSchema,
+    TEffectErrorMap,
+    TMeta,
+    TRequirementsProvided,
+    TRuntimeError
+  >["input"];
+  declare output: EffectBuilderSurface<
+    TInitialContext,
+    TCurrentContext,
+    TInputSchema,
+    TOutputSchema,
+    TEffectErrorMap,
+    TMeta,
+    TRequirementsProvided,
+    TRuntimeError
+  >["output"];
+  declare traced: EffectBuilderSurface<
+    TInitialContext,
+    TCurrentContext,
+    TInputSchema,
+    TOutputSchema,
+    TEffectErrorMap,
+    TMeta,
+    TRequirementsProvided,
+    TRuntimeError
+  >["traced"];
+  declare handler: EffectBuilderSurface<
+    TInitialContext,
+    TCurrentContext,
+    TInputSchema,
+    TOutputSchema,
+    TEffectErrorMap,
+    TMeta,
+    TRequirementsProvided,
+    TRuntimeError
+  >["handler"];
+  declare effect: EffectBuilderSurface<
+    TInitialContext,
+    TCurrentContext,
+    TInputSchema,
+    TOutputSchema,
+    TEffectErrorMap,
+    TMeta,
+    TRequirementsProvided,
+    TRuntimeError
+  >["effect"];
+  declare prefix: EffectBuilderSurface<
+    TInitialContext,
+    TCurrentContext,
+    TInputSchema,
+    TOutputSchema,
+    TEffectErrorMap,
+    TMeta,
+    TRequirementsProvided,
+    TRuntimeError
+  >["prefix"];
+  declare tag: EffectBuilderSurface<
+    TInitialContext,
+    TCurrentContext,
+    TInputSchema,
+    TOutputSchema,
+    TEffectErrorMap,
+    TMeta,
+    TRequirementsProvided,
+    TRuntimeError
+  >["tag"];
+  declare router: EffectBuilderSurface<
+    TInitialContext,
+    TCurrentContext,
+    TInputSchema,
+    TOutputSchema,
+    TEffectErrorMap,
+    TMeta,
+    TRequirementsProvided,
+    TRuntimeError
+  >["router"];
+  declare lazy: EffectBuilderSurface<
+    TInitialContext,
+    TCurrentContext,
+    TInputSchema,
+    TOutputSchema,
+    TEffectErrorMap,
+    TMeta,
+    TRequirementsProvided,
+    TRuntimeError
+  >["lazy"];
 
   constructor(
     def: EffectBuilderDef<
@@ -130,609 +510,26 @@ export class EffectBuilder<
       TRequirementsProvided,
       TRuntimeError
     >,
+    builder?: AnyBuilderLike,
   ) {
     const { runtime, spanConfig, effectErrorMap, ...orpcDef } = def;
-    this["~orpc"] = orpcDef;
-    this["~effect"] = { runtime, spanConfig, effectErrorMap, ...orpcDef };
-  }
 
-  /**
-   * Sets or overrides the config.
-   *
-   * @see {@link https://orpc.dev/docs/client/server-side#middlewares-order Middlewares Order Docs}
-   * @see {@link https://orpc.dev/docs/best-practices/dedupe-middleware#configuration Dedupe Middleware Docs}
-   */
-  $config(
-    config: BuilderConfig,
-  ): EffectBuilder<
-    TInitialContext,
-    TCurrentContext,
-    TInputSchema,
-    TOutputSchema,
-    TEffectErrorMap,
-    TMeta,
-    TRequirementsProvided,
-    TRuntimeError
-  > {
-    const inputValidationCount =
-      this["~effect"].inputValidationIndex -
-      fallbackConfig(
-        "initialInputValidationIndex",
-        this["~effect"].config.initialInputValidationIndex,
-      );
-    const outputValidationCount =
-      this["~effect"].outputValidationIndex -
-      fallbackConfig(
-        "initialOutputValidationIndex",
-        this["~effect"].config.initialOutputValidationIndex,
-      );
-
-    return new EffectBuilder({
-      ...this["~effect"],
-      config,
-      dedupeLeadingMiddlewares: fallbackConfig(
-        "dedupeLeadingMiddlewares",
-        config.dedupeLeadingMiddlewares,
-      ),
-      inputValidationIndex:
-        fallbackConfig(
-          "initialInputValidationIndex",
-          config.initialInputValidationIndex,
-        ) + inputValidationCount,
-      outputValidationIndex:
-        fallbackConfig(
-          "initialOutputValidationIndex",
-          config.initialOutputValidationIndex,
-        ) + outputValidationCount,
+    attachEffectState(this, builder ?? new Builder(orpcDef), {
+      effectErrorMap,
+      runtime,
+      spanConfig,
     });
-  }
 
-  /**
-   * Set or override the initial context.
-   *
-   * @see {@link https://orpc.dev/docs/context Context Docs}
-   */
-  $context<U extends Context>(): EffectBuilder<
-    U & Record<never, never>,
-    U,
-    TInputSchema,
-    TOutputSchema,
-    TEffectErrorMap,
-    TMeta,
-    TRequirementsProvided,
-    TRuntimeError
-  > {
-    /**
-     * We need `& Record<never, never>` to deal with `has no properties in common with type` error
-     */
-
-    return new EffectBuilder({
-      ...this["~effect"],
-      middlewares: [],
-      inputValidationIndex: fallbackConfig(
-        "initialInputValidationIndex",
-        this["~effect"].config.initialInputValidationIndex,
-      ),
-      outputValidationIndex: fallbackConfig(
-        "initialOutputValidationIndex",
-        this["~effect"].config.initialOutputValidationIndex,
-      ),
-    });
-  }
-
-  /**
-   * Sets or overrides the initial meta.
-   *
-   * @see {@link https://orpc.dev/docs/metadata Metadata Docs}
-   */
-  $meta<U extends Meta>(
-    initialMeta: U,
-  ): EffectBuilder<
-    TInitialContext,
-    TCurrentContext,
-    TInputSchema,
-    TOutputSchema,
-    TEffectErrorMap,
-    U & Record<never, never>,
-    TRequirementsProvided,
-    TRuntimeError
-  > {
-    /**
-     * We need `& Record<never, never>` to deal with `has no properties in common with type` error
-     */
-
-    return new EffectBuilder({
-      ...this["~effect"],
-      meta: initialMeta,
-    });
-  }
-
-  /**
-   * Sets or overrides the initial route.
-   * This option is typically relevant when integrating with OpenAPI.
-   *
-   * @see {@link https://orpc.dev/docs/openapi/routing OpenAPI Routing Docs}
-   * @see {@link https://orpc.dev/docs/openapi/input-output-structure OpenAPI Input/Output Structure Docs}
-   */
-  $route(
-    initialRoute: Route,
-  ): EffectBuilder<
-    TInitialContext,
-    TCurrentContext,
-    TInputSchema,
-    TOutputSchema,
-    TEffectErrorMap,
-    TMeta,
-    TRequirementsProvided,
-    TRuntimeError
-  > {
-    return new EffectBuilder({
-      ...this["~effect"],
-      route: initialRoute,
-    });
-  }
-
-  /**
-   * Sets or overrides the initial input schema.
-   *
-   * @see {@link https://orpc.dev/docs/procedure#initial-configuration Initial Procedure Configuration Docs}
-   */
-  $input<U extends AnySchema>(
-    initialInputSchema?: U,
-  ): EffectBuilder<
-    TInitialContext,
-    TCurrentContext,
-    U,
-    TOutputSchema,
-    TEffectErrorMap,
-    TMeta,
-    TRequirementsProvided,
-    TRuntimeError
-  > {
-    return new EffectBuilder({
-      ...this["~effect"],
-      inputSchema: initialInputSchema,
-    });
-  }
-
-  /**
-   * Creates a middleware.
-   *
-   * @see {@link https://orpc.dev/docs/middleware Middleware Docs}
-   */
-  middleware<
-    UOutContext extends IntersectPick<TCurrentContext, UOutContext>,
-    TInput,
-    TOutput = any,
-  >(
-    middleware: Middleware<
-      TInitialContext,
-      UOutContext,
-      TInput,
-      TOutput,
-      EffectErrorConstructorMap<TEffectErrorMap>,
-      TMeta
-    >,
-  ): DecoratedMiddleware<
-    TInitialContext,
-    UOutContext,
-    TInput,
-    TOutput,
-    any,
-    TMeta
-  > {
-    return decorateMiddleware(middleware);
-  }
-
-  /**
-   * Adds type-safe custom errors.
-   * Supports both traditional oRPC error definitions and ORPCTaggedError classes.
-   *
-   * @example
-   * ```ts
-   * // Traditional format
-   * builder.errors({ BAD_REQUEST: { status: 400, message: 'Bad request' } })
-   *
-   * // Tagged error class
-   * builder.errors({ USER_NOT_FOUND: UserNotFoundError })
-   *
-   * // Mixed
-   * builder.errors({
-   *   BAD_REQUEST: { status: 400 },
-   *   USER_NOT_FOUND: UserNotFoundError,
-   * })
-   * ```
-   *
-   * @see {@link https://orpc.dev/docs/error-handling#type%E2%80%90safe-error-handling Type-Safe Error Handling Docs}
-   */
-  errors<U extends EffectErrorMap>(
-    errors: U,
-  ): EffectBuilder<
-    TInitialContext,
-    TCurrentContext,
-    TInputSchema,
-    TOutputSchema,
-    MergedEffectErrorMap<TEffectErrorMap, U>,
-    TMeta,
-    TRequirementsProvided,
-    TRuntimeError
-  > {
-    const newEffectErrorMap: MergedEffectErrorMap<TEffectErrorMap, U> = {
-      ...this["~effect"].effectErrorMap,
-      ...errors,
-    };
-    return new EffectBuilder({
-      ...this["~effect"],
-      errorMap: effectErrorMapToErrorMap(newEffectErrorMap),
-      effectErrorMap: newEffectErrorMap,
-    });
-  }
-
-  /**
-   * Uses a middleware to modify the context or improve the pipeline.
-   *
-   * @info Supports both normal middleware and inline middleware implementations.
-   * @note The current context must be satisfy middleware dependent-context
-   * @see {@link https://orpc.dev/docs/middleware Middleware Docs}
-   */
-  use<
-    UOutContext extends IntersectPick<TCurrentContext, UOutContext>,
-    UInContext extends Context = TCurrentContext,
-  >(
-    middleware: Middleware<
-      UInContext | TCurrentContext,
-      UOutContext,
-      InferSchemaOutput<TInputSchema>,
-      unknown,
-      EffectErrorConstructorMap<TEffectErrorMap>,
-      TMeta
-    >,
-  ): EffectBuilder<
-    MergedInitialContext<TInitialContext, UInContext, TCurrentContext>,
-    MergedCurrentContext<TCurrentContext, UOutContext>,
-    TInputSchema,
-    TOutputSchema,
-    TEffectErrorMap,
-    TMeta,
-    TRequirementsProvided,
-    TRuntimeError
-  >;
-
-  use(
-    middleware: AnyMiddleware,
-    mapInput?: MapInputMiddleware<any, any>,
-  ): EffectBuilder<any, any, any, any, any, any, any, any> {
-    const mapped = mapInput
-      ? decorateMiddleware(middleware).mapInput(mapInput)
-      : middleware;
-
-    return new EffectBuilder({
-      ...this["~effect"],
-      middlewares: addMiddleware(this["~effect"].middlewares, mapped),
-    });
-  }
-
-  /**
-   * Sets or updates the metadata.
-   * The provided metadata is spared-merged with any existing metadata.
-   *
-   * @see {@link https://orpc.dev/docs/metadata Metadata Docs}
-   */
-  meta(
-    meta: TMeta,
-  ): EffectBuilder<
-    TInitialContext,
-    TCurrentContext,
-    TInputSchema,
-    TOutputSchema,
-    TEffectErrorMap,
-    TMeta,
-    TRequirementsProvided,
-    TRuntimeError
-  > {
-    return new EffectBuilder({
-      ...this["~effect"],
-      meta: mergeMeta(this["~effect"].meta, meta),
-    });
-  }
-
-  /**
-   * Sets or updates the route definition.
-   * The provided route is spared-merged with any existing route.
-   * This option is typically relevant when integrating with OpenAPI.
-   *
-   * @see {@link https://orpc.dev/docs/openapi/routing OpenAPI Routing Docs}
-   * @see {@link https://orpc.dev/docs/openapi/input-output-structure OpenAPI Input/Output Structure Docs}
-   */
-  route(
-    route: Route,
-  ): EffectBuilder<
-    TInitialContext,
-    TCurrentContext,
-    TInputSchema,
-    TOutputSchema,
-    TEffectErrorMap,
-    TMeta,
-    TRequirementsProvided,
-    TRuntimeError
-  > {
-    return new EffectBuilder({
-      ...this["~effect"],
-      route: mergeRoute(this["~effect"].route, route),
-    });
-  }
-
-  /**
-   * Defines the input validation schema.
-   *
-   * @see {@link https://orpc.dev/docs/procedure#input-output-validation Input Validation Docs}
-   */
-  input<USchema extends AnySchema>(
-    schema: USchema,
-  ): EffectProcedureBuilderWithInput<
-    TInitialContext,
-    TCurrentContext,
-    USchema,
-    TOutputSchema,
-    TEffectErrorMap,
-    TMeta,
-    TRequirementsProvided,
-    TRuntimeError
-  > {
-    return new EffectBuilder({
-      ...this["~effect"],
-      inputSchema: schema,
-      inputValidationIndex:
-        fallbackConfig(
-          "initialInputValidationIndex",
-          this["~effect"].config.initialInputValidationIndex,
-        ) + this["~effect"].middlewares.length,
-      // we cast to any because EffectProcedureBuilderWithInput is expecting
-      // use() input type to be defined, and EffectBuilder types its use() input
-      // to unknown to allow any middleware to be passed
-      // ---
-      // note: the original implentation of the builder also uses any for the same reason
-    }) as any;
-  }
-
-  /**
-   * Defines the output validation schema.
-   *
-   * @see {@link https://orpc.dev/docs/procedure#input-output-validation Output Validation Docs}
-   */
-  output<USchema extends AnySchema>(
-    schema: USchema,
-  ): EffectProcedureBuilderWithOutput<
-    TInitialContext,
-    TCurrentContext,
-    TInputSchema,
-    USchema,
-    TEffectErrorMap,
-    TMeta,
-    TRequirementsProvided,
-    TRuntimeError
-  > {
-    // We cast to any because EffectProcedureBuilderWithOutput narrows
-    // handler/effect output typing based on the declared output schema.
-    return new EffectBuilder({
-      ...this["~effect"],
-      outputSchema: schema,
-      outputValidationIndex:
-        fallbackConfig(
-          "initialOutputValidationIndex",
-          this["~effect"].config.initialOutputValidationIndex,
-        ) + this["~effect"].middlewares.length,
-    }) as any;
-  }
-
-  /**
-   * Adds a traceable span to the procedure for telemetry.
-   * The span name is used for Effect tracing via `Effect.withSpan`.
-   * Stack trace is captured at the call site for better error reporting.
-   *
-   * @param spanName - The name of the span for telemetry (e.g., 'users.getUser')
-   * @returns An EffectBuilder with span tracing configured
-   *
-   * @example
-   * ```ts
-   * const getUser = effectOs
-   *   .input(z.object({ id: z.string() }))
-   *   .traced('users.getUser')
-   *   .effect(function* ({ input }) {
-   *     const userService = yield* UserService
-   *     return yield* userService.findById(input.id)
-   *   })
-   * ```
-   */
-  traced(
-    spanName: string,
-  ): EffectBuilder<
-    TInitialContext,
-    TCurrentContext,
-    TInputSchema,
-    TOutputSchema,
-    TEffectErrorMap,
-    TMeta,
-    TRequirementsProvided,
-    TRuntimeError
-  > {
-    return new EffectBuilder({
-      ...this["~effect"],
-      spanConfig: {
-        name: spanName,
-        captureStackTrace: addSpanStackTrace(),
-      },
-    });
-  }
-
-  handler<UFuncOutput>(
-    handler: ProcedureHandler<
-      TCurrentContext,
-      InferSchemaOutput<TInputSchema>,
-      UFuncOutput,
-      EffectErrorMapToErrorMap<TEffectErrorMap>,
-      TMeta
-    >,
-  ): EffectDecoratedProcedure<
-    TInitialContext,
-    TCurrentContext,
-    TInputSchema,
-    Schema<UFuncOutput, UFuncOutput>,
-    TEffectErrorMap,
-    TMeta,
-    TRequirementsProvided,
-    TRuntimeError
-  > {
-    return new EffectDecoratedProcedure({
-      ...this["~effect"],
-      handler,
-    });
-  }
-
-  /**
-   * Defines the handler of the procedure using an Effect.
-   * The Effect is executed using the ManagedRuntime provided during builder creation.
-   * The effect is automatically wrapped with `Effect.withSpan`.
-   *
-   * @see {@link https://orpc.dev/docs/procedure Procedure Docs}
-   */
-  effect<UFuncOutput>(
-    effectFn: EffectProcedureHandler<
-      TCurrentContext,
-      TInputSchema,
-      UFuncOutput,
-      TEffectErrorMap,
-      TRequirementsProvided,
-      TMeta
-    >,
-  ): EffectDecoratedProcedure<
-    TInitialContext,
-    TCurrentContext,
-    TInputSchema,
-    Schema<UFuncOutput, UFuncOutput>,
-    TEffectErrorMap,
-    TMeta,
-    TRequirementsProvided,
-    TRuntimeError
-  > {
-    const { runtime, spanConfig } = this["~effect"];
-    // Capture stack trace at definition time for default tracing
-    const defaultCaptureStackTrace = addSpanStackTrace();
-    return new EffectDecoratedProcedure({
-      ...this["~effect"],
-      handler: async (opts) => {
-        return createEffectProcedureHandler({
-          runtime,
-          effectErrorMap: this["~effect"].effectErrorMap,
-          effectFn,
-          spanConfig,
-          defaultCaptureStackTrace,
-        })(opts as any);
-      },
-    });
-  }
-
-  /**
-   * Prefixes all procedures in the router.
-   * The provided prefix is post-appended to any existing router prefix.
-   *
-   * @note This option does not affect procedures that do not define a path in their route definition.
-   *
-   * @see {@link https://orpc.dev/docs/openapi/routing#route-prefixes OpenAPI Route Prefixes Docs}
-   */
-  prefix(
-    prefix: HTTPPath,
-  ): EffectRouterBuilder<
-    TInitialContext,
-    TCurrentContext,
-    TEffectErrorMap,
-    TMeta,
-    TRequirementsProvided,
-    TRuntimeError
-  > {
-    return new EffectBuilder({
-      ...this["~effect"],
-      prefix: mergePrefix(this["~effect"].prefix, prefix),
-    }) as any;
-  }
-
-  /**
-   * Adds tags to all procedures in the router.
-   * This helpful when you want to group procedures together in the OpenAPI specification.
-   *
-   * @see {@link https://orpc.dev/docs/openapi/openapi-specification#operation-metadata OpenAPI Operation Metadata Docs}
-   */
-  tag(
-    ...tags: string[]
-  ): EffectRouterBuilder<
-    TInitialContext,
-    TCurrentContext,
-    TEffectErrorMap,
-    TMeta,
-    TRequirementsProvided,
-    TRuntimeError
-  > {
-    return new EffectBuilder({
-      ...this["~effect"],
-      tags: mergeTags(this["~effect"].tags, tags),
-    }) as any;
-  }
-
-  /**
-   * Applies all of the previously defined options to the specified router.
-   *
-   * @see {@link https://orpc.dev/docs/router#extending-router Extending Router Docs}
-   */
-  router<U extends Router<ContractRouter<TMeta>, TCurrentContext>>(
-    router: U,
-  ): EnhancedEffectRouter<
-    U,
-    TInitialContext,
-    TCurrentContext,
-    TEffectErrorMap
-  > {
-    return enhanceEffectRouter(router, {
-      ...this["~effect"],
-    }) as any; // Type instantiation is excessively deep and possibly infinite
-  }
-
-  /**
-   * Create a lazy router
-   * And applies all of the previously defined options to the specified router.
-   *
-   * @see {@link https://orpc.dev/docs/router#extending-router Extending Router Docs}
-   */
-  lazy<U extends Router<ContractRouter<TMeta>, TCurrentContext>>(
-    loader: () => Promise<{ default: U }>,
-  ): EnhancedEffectRouter<
-    Lazy<U>,
-    TInitialContext,
-    TCurrentContext,
-    TEffectErrorMap
-  > {
-    return enhanceEffectRouter(lazy(loader), {
-      ...this["~effect"],
-    }) as any; // Type instantiation is excessively deep and possibly infinite
+    return createEffectBuilderProxy(this);
   }
 }
 
 /**
  * Creates an Effect-aware procedure builder with the specified ManagedRuntime.
- * Uses the default `os` builder from `@orpc/server`.
+ * Uses the default builder shape from `@orpc/server`.
  *
  * @param runtime - The ManagedRuntime that provides services for Effect procedures
  * @returns An EffectBuilder instance for creating Effect-native procedures
- *
- * @example
- * ```ts
- * import { makeEffectORPC } from '@orpc/effect'
- * import { Effect, Layer, ManagedRuntime } from 'effect'
- *
- * const runtime = ManagedRuntime.make(Layer.empty)
- * const effectOs = makeEffectORPC(runtime)
- *
- * const hello = effectOs.effect(() => Effect.succeed('Hello!'))
- * ```
  */
 export function makeEffectORPC<TRequirementsProvided, TRuntimeError>(
   runtime: ManagedRuntime.ManagedRuntime<TRequirementsProvided, TRuntimeError>,
@@ -752,31 +549,8 @@ export function makeEffectORPC<TRequirementsProvided, TRuntimeError>(
  * with the specified ManagedRuntime.
  *
  * @param runtime - The ManagedRuntime that provides services for Effect procedures
- * @param builder - The oRPC Builder instance to wrap (e.g., a customized `os`)
+ * @param builder - The oRPC Builder instance to wrap
  * @returns An EffectBuilder instance that extends the original builder with Effect support
- *
- * @example
- * ```ts
- * import { makeEffectORPC } from '@orpc/effect'
- * import { os } from '@orpc/server'
- * import { Effect, Layer, ManagedRuntime } from 'effect'
- *
- * // Create a customized builder
- * const authedOs = os.use(authMiddleware)
- *
- * // Wrap it with Effect support
- * const runtime = ManagedRuntime.make(UserServiceLive)
- * const effectOs = makeEffectORPC(runtime, authedOs)
- *
- * const getUser = effectOs
- *   .input(z.object({ id: z.string() }))
- *   .effect(
- *     Effect.fn(function* ({ input }) {
- *       const userService = yield* UserService
- *       return yield* userService.findById(input.id)
- *     })
- *   )
- * ```
  */
 export function makeEffectORPC<
   TBuilder extends AnyBuilderLike<
@@ -819,23 +593,26 @@ export function makeEffectORPC<TRequirementsProvided, TRuntimeError>(
   TRuntimeError
 > {
   const resolvedBuilder = builder ?? emptyBuilder();
-  return new EffectBuilder({
-    ...resolvedBuilder["~orpc"],
-    errorMap: effectErrorMapToErrorMap(resolvedBuilder["~orpc"].errorMap),
-    effectErrorMap: resolvedBuilder["~orpc"].errorMap,
-    runtime,
-  });
+  return new EffectBuilder(
+    {
+      ...resolvedBuilder["~orpc"],
+      effectErrorMap: getEffectErrorMap(resolvedBuilder),
+      errorMap: effectErrorMapToErrorMap(getEffectErrorMap(resolvedBuilder)),
+      runtime,
+    },
+    unwrapEffectUpstream(resolvedBuilder),
+  );
 }
 
 function emptyBuilder(): AnyBuilderLike {
   return new Builder({
     config: {},
-    route: {},
-    meta: {},
+    dedupeLeadingMiddlewares: true,
     errorMap: {},
     inputValidationIndex: fallbackConfig("initialInputValidationIndex"),
-    outputValidationIndex: fallbackConfig("initialOutputValidationIndex"),
+    meta: {},
     middlewares: [],
-    dedupeLeadingMiddlewares: true,
+    outputValidationIndex: fallbackConfig("initialOutputValidationIndex"),
+    route: {},
   });
 }

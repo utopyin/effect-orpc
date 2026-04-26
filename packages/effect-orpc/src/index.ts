@@ -45,6 +45,8 @@ export type {
 export type {
   AnyBuilderLike,
   EffectBuilderDef,
+  EffectBuilderSurface,
+  EffectDecoratedProcedureSurface,
   EffectBuilderWithMiddlewares,
   EffectErrorMapToErrorMap,
   EffectProcedureBuilder,

@@ -19,6 +19,7 @@ import {
 import type { ManagedRuntime } from "effect/ManagedRuntime";
 
 import { EffectProcedure } from "./effect-procedure";
+import { getEffectErrorMap, unwrapEffectUpstream } from "./extension/state";
 import { effectErrorMapToErrorMap, type EffectErrorMap } from "./tagged-error";
 import type { EffectErrorMapToErrorMap, EnhancedEffectRouter } from "./types";
 
@@ -51,14 +52,14 @@ export function enhanceEffectRouter<
   if (isLazy(router)) {
     const laziedMeta = getLazyMeta(router);
     const enhancedPrefix = laziedMeta?.prefix
-      ? mergePrefix(options.prefix, laziedMeta?.prefix)
+      ? mergePrefix(options.prefix, laziedMeta.prefix)
       : options.prefix;
 
     const enhanced = lazy(
       async () => {
         const { default: unlaziedRouter } = await unlazy(router);
-        const enhanced = enhanceEffectRouter(unlaziedRouter, options);
-        return unlazy(enhanced);
+        const wrappedRouter = enhanceEffectRouter(unlaziedRouter, options);
+        return unlazy(wrappedRouter);
       },
       {
         ...laziedMeta,
@@ -66,43 +67,41 @@ export function enhanceEffectRouter<
       },
     );
 
-    const accessible = createAccessibleLazyRouter(enhanced);
-
-    return accessible as any;
+    return createAccessibleLazyRouter(enhanced) as any;
   }
 
   if (isProcedure(router)) {
-    const newMiddlewares = mergeMiddlewares(
+    const source = unwrapEffectUpstream(router);
+    const sourceEffectErrorMap = getEffectErrorMap(router);
+    const middlewares = mergeMiddlewares(
       options.middlewares,
-      router["~orpc"].middlewares,
+      source["~orpc"].middlewares,
       { dedupeLeading: options.dedupeLeadingMiddlewares },
     );
     const newMiddlewareAdded =
-      newMiddlewares.length - router["~orpc"].middlewares.length;
-
+      middlewares.length - source["~orpc"].middlewares.length;
     const effectErrorMap = {
       ...options.errorMap,
-      ...router["~orpc"].errorMap,
+      ...sourceEffectErrorMap,
     };
     const errorMap: EffectErrorMapToErrorMap<typeof effectErrorMap> =
       effectErrorMapToErrorMap(effectErrorMap);
-    const enhanced = new EffectProcedure({
-      ...router["~orpc"],
-      route: enhanceRoute(router["~orpc"].route, options),
+
+    return new EffectProcedure({
+      ...source["~orpc"],
+      route: enhanceRoute(source["~orpc"].route, options),
       effectErrorMap,
       errorMap: errorMap as EffectErrorMapToErrorMap<typeof effectErrorMap>,
-      middlewares: newMiddlewares,
+      middlewares,
       inputValidationIndex:
-        router["~orpc"].inputValidationIndex + newMiddlewareAdded,
+        source["~orpc"].inputValidationIndex + newMiddlewareAdded,
       outputValidationIndex:
-        router["~orpc"].outputValidationIndex + newMiddlewareAdded,
+        source["~orpc"].outputValidationIndex + newMiddlewareAdded,
       runtime: options.runtime,
-    });
-
-    return enhanced as any;
+    }) as any;
   }
 
-  const enhanced = {} as Record<string, any>;
+  const enhanced: Record<string, any> = {};
 
   for (const key in router) {
     enhanced[key] = enhanceEffectRouter(router[key]!, options);

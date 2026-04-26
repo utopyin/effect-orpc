@@ -4,12 +4,10 @@ import type {
   ErrorMap,
   ErrorMapItem,
   Meta,
-  Route,
   Schema,
 } from "@orpc/contract";
 import type {
   Builder,
-  BuilderConfig,
   BuilderDef,
   BuilderWithMiddlewares,
   Context,
@@ -32,6 +30,19 @@ import type {
   ORPCTaggedErrorInstance,
 } from "../tagged-error";
 
+type EffectBuilderDefBase<
+  TInputSchema extends AnySchema,
+  TOutputSchema extends AnySchema,
+  TEffectErrorMap extends EffectErrorMap,
+  TMeta extends Meta,
+> = EnhanceRouterOptions<EffectErrorMapToErrorMap<TEffectErrorMap>> &
+  BuilderDef<
+    TInputSchema,
+    TOutputSchema,
+    EffectErrorMapToErrorMap<TEffectErrorMap>,
+    TMeta
+  >;
+
 /**
  * Extended builder definition that includes the Effect ManagedRuntime.
  */
@@ -42,14 +53,12 @@ export interface EffectBuilderDef<
   TMeta extends Meta,
   TRequirementsProvided,
   TRuntimeError,
-> extends EnhanceRouterOptions<EffectErrorMapToErrorMap<TEffectErrorMap>> {
-  inputValidationIndex: number;
-  outputValidationIndex: number;
-  config: BuilderConfig;
-  meta: TMeta;
-  route: Route;
-  inputSchema?: TInputSchema;
-  outputSchema?: TOutputSchema;
+> extends EffectBuilderDefBase<
+  TInputSchema,
+  TOutputSchema,
+  TEffectErrorMap,
+  TMeta
+> {
   runtime: ManagedRuntime.ManagedRuntime<TRequirementsProvided, TRuntimeError>;
   /**
    * Optional span configuration for Effect tracing.
@@ -412,5 +421,8 @@ export type InferBuilderMeta<T> =
               : T extends RouterBuilder<any, any, any, infer TMeta>
                 ? TMeta
                 : Meta;
+
+export type { EffectBuilderSurface } from "./effect-builder-surface";
+export type { EffectDecoratedProcedureSurface } from "./effect-procedure-surface";
 
 export * from "./variants";

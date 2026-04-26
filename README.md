@@ -29,7 +29,7 @@ Runnable demos live in the repository's `examples/` directory.
 
 ```ts
 import { os } from "@orpc/server";
-import { Effect, ManagedRuntime } from "effect";
+import { Effect, Layer, ManagedRuntime, Context } from "effect";
 import { makeEffectORPC, ORPCTaggedError } from "effect-orpc";
 
 interface User {
@@ -53,12 +53,16 @@ const authedOs = os
   });
 
 // Define your services
-class UsersRepo extends Effect.Service<UsersRepo>()("UsersRepo", {
-  accessors: true,
-  sync: () => ({
+class UsersRepo extends Context.Service<
+  UsersRepo,
+  {
+    readonly get: (id: number) => User | undefined;
+  }
+>()("UsersRepo") {
+  static readonly layer = Layer.succeed(this, {
     get: (id: number) => users.find((u) => u.id === id),
-  }),
-}) {}
+  });
+}
 
 // Special yieldable oRPC error class
 class UserNotFoundError extends ORPCTaggedError("UserNotFoundError", {
@@ -66,7 +70,7 @@ class UserNotFoundError extends ORPCTaggedError("UserNotFoundError", {
 }) {}
 
 // Create runtime with your services
-const runtime = ManagedRuntime.make(UsersRepo.Default);
+const runtime = ManagedRuntime.make(UsersRepo.layer);
 // Create Effect-aware oRPC builder from an other (optional) base oRPC builder and provide tagged errors
 const effectOs = makeEffectORPC(runtime, authedOs).errors({
   UserNotFoundError,
@@ -77,7 +81,8 @@ export const router = {
   health: os.handler(() => "ok"),
   users: {
     me: effectOs.effect(function* ({ context: { userId } }) {
-      const user = yield* UsersRepo.get(userId);
+      const usersRepo = yield* UsersRepo;
+      const user = usersRepo.get(userId);
       if (!user) {
         return yield* new UserNotFoundError();
       }
@@ -94,18 +99,22 @@ export type Router = typeof router;
 The wrapper enforces that Effect procedures only use services provided by the `ManagedRuntime`. If you try to use a service that isn't in the runtime, you'll get a compile-time error:
 
 ```ts
-import { Context, Effect, Layer, ManagedRuntime } from "effect";
+import { Effect, Layer, ManagedRuntime, Context } from "effect";
 import { makeEffectORPC } from "effect-orpc";
 
-class ProvidedService extends Context.Tag("ProvidedService")<
+class ProvidedService extends Context.Service<
   ProvidedService,
-  { doSomething: () => Effect.Effect<string> }
->() {}
+  {
+    readonly doSomething: () => Effect.Effect<string>;
+  }
+>()("ProvidedService") {}
 
-class MissingService extends Context.Tag("MissingService")<
+class MissingService extends Context.Service<
   MissingService,
-  { doSomething: () => Effect.Effect<string> }
->() {}
+  {
+    readonly doSomething: () => Effect.Effect<string>;
+  }
+>()("MissingService") {}
 
 const runtime = ManagedRuntime.make(
   Layer.succeed(ProvidedService, {

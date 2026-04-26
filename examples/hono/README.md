@@ -9,7 +9,8 @@ It demonstrates:
 - `makeEffectORPC` imported from `effect-orpc`
 - `eoc` + `implementEffect` contract routes imported from `effect-orpc`
 - `withFiberContext(() => next())` imported from `effect-orpc/node`
-- nested Effect services preserving the same request-scoped annotations
+- nested Effect services preserving the same request-scoped annotations and
+  references
 - a contract router with:
   - shared router-level errors, prefixes, and OpenAPI tags
   - per-procedure metadata, inputs, outputs, and route definitions

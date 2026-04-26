@@ -1,13 +1,13 @@
 import { ORPCError } from "@orpc/contract";
 import type {
-  Context,
+  Context as ORPCContext,
   ProcedureHandler,
   ProcedureHandlerOptions,
 } from "@orpc/server";
 import type { ManagedRuntime } from "effect";
-import { Cause, Effect, Exit, FiberRefs } from "effect";
+import { Cause, Effect, Exit, Result, Context } from "effect";
 
-import { getCurrentFiberRefs } from "./fiber-context-bridge";
+import { getCurrentServices } from "./service-context-bridge";
 import type { EffectErrorConstructorMap, EffectErrorMap } from "./tagged-error";
 import {
   createEffectErrorConstructorMap,
@@ -18,42 +18,54 @@ import type { EffectProcedureHandler, EffectSpanConfig } from "./types";
 export function toORPCErrorFromCause(
   cause: Cause.Cause<unknown>,
 ): ORPCError<string, unknown> {
-  return Cause.match(cause, {
-    onDie(defect) {
+  if (Cause.hasFails(cause)) {
+    const reason = Cause.findFail(cause);
+    if (Result.isFailure(reason)) {
+      return new ORPCError("INTERNAL_SERVER_ERROR");
+    }
+
+    const error = reason.success.error;
+    if (isORPCTaggedError(error)) {
+      return error.toORPCError();
+    }
+    if (error instanceof ORPCError) {
+      return error;
+    }
+
+    return new ORPCError("INTERNAL_SERVER_ERROR", {
+      cause: error,
+    });
+  }
+
+  if (Cause.hasDies(cause)) {
+    const reason = Cause.findDie(cause);
+    if (Result.isFailure(reason)) {
       return new ORPCError("INTERNAL_SERVER_ERROR", {
-        cause: defect,
+        cause: new Error(`Died by unknown reason`),
       });
-    },
-    onFail(error) {
-      if (isORPCTaggedError(error)) {
-        return error.toORPCError();
-      }
-      if (error instanceof ORPCError) {
-        return error;
-      }
+    }
+    return new ORPCError("INTERNAL_SERVER_ERROR", {
+      cause: reason.success.defect,
+    });
+  }
+
+  if (Cause.hasInterrupts(cause)) {
+    const reason = Cause.findInterrupt(cause);
+    if (Result.isFailure(reason)) {
       return new ORPCError("INTERNAL_SERVER_ERROR", {
-        cause: error,
+        cause: new Error(`Unknown fiber got interrupted`),
       });
-    },
-    onInterrupt(fiberId) {
-      return new ORPCError("INTERNAL_SERVER_ERROR", {
-        cause: new Error(`${fiberId} Interrupted`),
-      });
-    },
-    onSequential(left) {
-      return left;
-    },
-    onEmpty: new ORPCError("INTERNAL_SERVER_ERROR", {
-      cause: new Error("Unknown error"),
-    }),
-    onParallel(left) {
-      return left;
-    },
-  });
+    }
+    return new ORPCError("INTERNAL_SERVER_ERROR", {
+      cause: new Error(`${reason.success.fiberId} got interrupted`),
+    });
+  }
+
+  return new ORPCError("INTERNAL_SERVER_ERROR");
 }
 
 export function createEffectProcedureHandler<
-  TCurrentContext extends Context,
+  TCurrentContext extends ORPCContext,
   TInput,
   TOutput,
   TEffectErrorMap extends EffectErrorMap,
@@ -111,19 +123,17 @@ export function createEffectProcedureHandler<
     const tracedEffect = Effect.withSpan(resolver(effectOpts), spanName, {
       captureStackTrace,
     });
-    const parentFiberRefs = getCurrentFiberRefs();
-    const effectWithRefs = parentFiberRefs
-      ? Effect.fiberIdWith((fiberId) =>
-          Effect.flatMap(Effect.getFiberRefs, (fiberRefs) =>
-            Effect.setFiberRefs(
-              FiberRefs.joinAs(fiberRefs, fiberId, parentFiberRefs),
-            ).pipe(Effect.andThen(tracedEffect)),
-          ),
-        )
-      : tracedEffect;
-    const exit = await runtime.runPromiseExit(effectWithRefs, {
-      signal: opts.signal,
-    });
+
+    const parentServices = getCurrentServices();
+    const exit = parentServices
+      ? await Effect.runPromiseExitWith(
+          Context.merge(await runtime.context(), parentServices),
+        )(tracedEffect, {
+          signal: opts.signal,
+        })
+      : await runtime.runPromiseExit(tracedEffect, {
+          signal: opts.signal,
+        });
 
     if (Exit.isFailure(exit)) {
       throw toORPCErrorFromCause(exit.cause);

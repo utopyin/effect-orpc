@@ -41,7 +41,8 @@ const directRouter = {
     .output(z.array(orderSchema))
     .effect(function* () {
       yield* Effect.logInfo("Handler: GET /orders - listing all orders");
-      const orders = yield* OrderService.listOrders();
+      const service = yield* OrderService;
+      const orders = yield* service.listOrders();
       return orders.map(toTypedOrder);
     }),
   test: directProcedureBuilder
@@ -104,7 +105,10 @@ const contractRouter = contractImplementer.router({
   },
   orders: {
     list: ordersImplementer.list.effect(function* ({ context, input }) {
-      const orders = (yield* OrderService.listOrders()).map(toTypedOrder);
+      const service = yield* OrderService;
+      const orders = yield* service
+        .listOrders()
+        .pipe(Effect.map((o) => o.map(toTypedOrder)));
       const filtered = input.status
         ? orders.filter((order) => order.status === input.status)
         : orders;
@@ -135,7 +139,8 @@ const contractRouter = contractImplementer.router({
       )
       .effect(function* ({ context, input, errors }) {
         const normalizedOrderId = input.orderId.trim().toUpperCase();
-        const order = yield* OrderService.getOrder(normalizedOrderId);
+        const service = yield* OrderService;
+        const order = yield* service.getOrder(normalizedOrderId);
 
         if (order.status === "not found") {
           return yield* Effect.fail(
@@ -215,9 +220,8 @@ const contractRouter = contractImplementer.router({
         );
       }
 
-      const order = yield* OrderService.getOrder(
-        input.orderId.trim().toUpperCase(),
-      );
+      const service = yield* OrderService;
+      const order = yield* service.getOrder(input.orderId.trim().toUpperCase());
 
       if (order.status === "not found") {
         return yield* Effect.fail(
@@ -264,8 +268,9 @@ const contractRouter = contractImplementer.router({
         );
       }
 
+      const service = yield* OrderService;
       const orders = yield* Effect.forEach(input.orderIds, (orderId) =>
-        OrderService.getOrder(orderId.trim().toUpperCase()),
+        service.getOrder(orderId.trim().toUpperCase()),
       );
 
       return {
@@ -293,8 +298,11 @@ const contractRouter = contractImplementer.router({
         );
       }
 
-      const orders = (yield* OrderService.listOrders()).map(toTypedOrder);
-      yield* Effect.forEach(orders, (order) => OrderService.getOrder(order.id));
+      const service = yield* OrderService;
+      const orders = yield* service
+        .listOrders()
+        .pipe(Effect.map((o) => o.map(toTypedOrder)));
+      yield* Effect.forEach(orders, (order) => service.getOrder(order.id));
 
       return {
         requestId: context.requestId,

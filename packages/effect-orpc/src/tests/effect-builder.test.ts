@@ -1,7 +1,7 @@
 import type { InferSchemaOutput } from "@orpc/contract";
 import { isContractProcedure } from "@orpc/contract";
 import { os } from "@orpc/server";
-import { Effect, FiberRef, Layer, ManagedRuntime } from "effect";
+import { Effect, Layer, ManagedRuntime, Context } from "effect";
 import { beforeEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 import z from "zod";
 
@@ -20,6 +20,9 @@ import {
 
 const mid = vi.fn();
 const runtime = ManagedRuntime.make(Layer.empty);
+const RequestId = Context.Reference<string>("RequestId", {
+  defaultValue: () => "missing",
+});
 
 const def = {
   config: {
@@ -160,16 +163,14 @@ describe("effectBuilder", () => {
     expect(effectFn).toHaveBeenCalledTimes(1);
   });
 
-  it(".effect does not inherit parent FiberRefs by default", async () => {
-    const requestIdRef = FiberRef.unsafeMake("missing");
+  it(".effect does not inherit parent request context by default", async () => {
     const applied = builder.effect(function* () {
-      return yield* FiberRef.get(requestIdRef);
+      return yield* RequestId;
     });
 
     const result = await Effect.runPromise(
-      Effect.gen(function* () {
-        yield* FiberRef.set(requestIdRef, "req-123");
-        return yield* Effect.promise(() =>
+      Effect.provideService(
+        Effect.promise(() =>
           applied["~effect"].handler({
             context: {},
             input: undefined,
@@ -179,23 +180,23 @@ describe("effectBuilder", () => {
             lastEventId: undefined,
             errors: {},
           }),
-        );
-      }),
+        ),
+        RequestId,
+        "req-123",
+      ),
     );
 
     expect(result).toBe("missing");
   });
 
-  it(".effect inherits parent FiberRefs with withFiberContext", async () => {
-    const requestIdRef = FiberRef.unsafeMake("missing");
+  it(".effect inherits parent request context with withFiberContext", async () => {
     const applied = builder.effect(function* () {
-      return yield* FiberRef.get(requestIdRef);
+      return yield* RequestId;
     });
 
     const result = await Effect.runPromise(
-      Effect.gen(function* () {
-        yield* FiberRef.set(requestIdRef, "req-123");
-        return yield* withFiberContext(() =>
+      Effect.provideService(
+        withFiberContext(() =>
           applied["~effect"].handler({
             context: {},
             input: undefined,
@@ -205,57 +206,95 @@ describe("effectBuilder", () => {
             lastEventId: undefined,
             errors: {},
           }),
-        );
-      }),
+        ),
+        RequestId,
+        "req-123",
+      ),
     );
 
     expect(result).toBe("req-123");
   });
 
-  it(".effect merges context FiberRefs with runtime FiberRefs, prioritizing context FiberRefs", async () => {
-    const requestIdRef = FiberRef.unsafeMake("missing");
-
-    class Counter extends Effect.Tag("Counter")<
+  it("merges runtime services with captured request context", async () => {
+    class Counter extends Context.Service<
       Counter,
-      { increment: (n: number) => Effect.Effect<number> }
-    >() {}
+      {
+        readonly increment: (n: number) => Effect.Effect<number>;
+      }
+    >()("Counter") {}
 
-    const CounterLive = Layer.succeed(Counter, {
-      increment: (n: number) => Effect.succeed(n + 1),
-    });
-    const serviceRuntime = ManagedRuntime.make(CounterLive);
-    const effectBuilder = makeEffectORPC(serviceRuntime);
-    const procedure = effectBuilder.input(z.number()).effect(function* ({
+    const serviceRuntime = ManagedRuntime.make(
+      Layer.succeed(Counter, {
+        increment: (n: number) => Effect.succeed(n + 1),
+      }),
+    );
+    const serviceBuilder = makeEffectORPC(serviceRuntime);
+
+    const applied = serviceBuilder.input(z.number()).effect(function* ({
       input,
     }) {
-      const requestId = yield* FiberRef.get(requestIdRef);
-      const value = yield* Counter.increment(input as number);
+      const counter = yield* Counter;
+      const requestId = yield* RequestId;
 
-      return { requestId, value };
+      return {
+        next: yield* counter.increment(input),
+        requestId,
+      };
     });
 
-    try {
-      const result = await Effect.runPromise(
-        Effect.gen(function* () {
-          yield* FiberRef.set(requestIdRef, "req-123");
-          return yield* withFiberContext(() =>
-            procedure["~effect"].handler({
-              context: {},
-              input: 5,
-              path: ["test"],
-              procedure: procedure as any,
-              signal: undefined,
-              lastEventId: undefined,
-              errors: {},
-            }),
-          );
-        }),
-      );
+    const result = await Effect.runPromise(
+      Effect.provideService(
+        withFiberContext(() =>
+          applied["~effect"].handler({
+            context: {},
+            input: 2,
+            path: ["test"],
+            procedure: applied as any,
+            signal: undefined,
+            lastEventId: undefined,
+            errors: {},
+          }),
+        ),
+        RequestId,
+        "req-ctx",
+      ),
+    );
 
-      expect(result).toEqual({ requestId: "req-123", value: 6 });
-    } finally {
-      await serviceRuntime.dispose();
-    }
+    expect(result).toEqual({ next: 3, requestId: "req-ctx" });
+
+    await serviceRuntime.dispose();
+  });
+
+  it("captured request context wins over runtime services", async () => {
+    const runtimeWithRequestId = ManagedRuntime.make(
+      Layer.succeed(RequestId, "runtime-id"),
+    );
+    const serviceBuilder = makeEffectORPC(runtimeWithRequestId);
+    const applied = serviceBuilder.effect(function* () {
+      return yield* RequestId;
+    });
+
+    const result = await Effect.runPromise(
+      Effect.provideService(
+        withFiberContext(() =>
+          applied["~effect"].handler({
+            context: {},
+            input: undefined,
+            path: ["test"],
+            procedure: applied as any,
+            signal: undefined,
+            lastEventId: undefined,
+            errors: {},
+          }),
+        ),
+        RequestId,
+        "request-id",
+      ),
+    );
+
+    expect(result).toBe("request-id");
+
+    await runtimeWithRequestId.dispose();
   });
 });
 
@@ -366,10 +405,12 @@ describe("makeEffectORPC factory", () => {
 describe("effect with services", () => {
   it("can use services from runtime layer", async () => {
     // Define a simple service
-    class Counter extends Effect.Tag("Counter")<
+    class Counter extends Context.Service<
       Counter,
-      { increment: (n: number) => Effect.Effect<number> }
-    >() {}
+      {
+        readonly increment: (n: number) => Effect.Effect<number>;
+      }
+    >()("Counter") {}
 
     // Create a layer with the service
     const CounterLive = Layer.succeed(Counter, {
@@ -562,10 +603,12 @@ describe("default tracing (without .traced())", () => {
   });
 
   it("default tracing works with services from runtime", async () => {
-    class Greeter extends Effect.Tag("Greeter")<
+    class Greeter extends Context.Service<
       Greeter,
-      { greet: (name: string) => Effect.Effect<string> }
-    >() {}
+      {
+        readonly greet: (name: string) => Effect.Effect<string>;
+      }
+    >()("Greeter") {}
 
     const GreeterLive = Layer.succeed(Greeter, {
       greet: (name: string) => Effect.succeed(`Hello, ${name}!`),
@@ -577,7 +620,8 @@ describe("default tracing (without .traced())", () => {
     const procedure = effectBuilder
       .input(z.object({ name: z.string() }))
       .effect(function* ({ input }) {
-        return yield* Greeter.greet(input.name);
+        const greeter = yield* Greeter;
+        return yield* greeter.greet(input.name);
       });
 
     const result = await procedure["~effect"].handler({

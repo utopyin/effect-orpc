@@ -1,0 +1,12 @@
+{
+  "mode": "pre",
+  "tag": "effect-v4",
+  "initialVersions": {
+    "effect-orpc": "0.1.2"
+  },
+  "changesets": [
+    "big-words-flow",
+    "fluffy-times-shave",
+    "silly-doodles-cover"
+  ]
+}

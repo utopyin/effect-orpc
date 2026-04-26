@@ -16,7 +16,7 @@ import {
   type Context,
   type Lazyable,
 } from "@orpc/server";
-import type { ManagedRuntime } from "effect/ManagedRuntime";
+import type { ManagedRuntime } from "effect";
 
 import { EffectProcedure } from "./effect-procedure";
 import { effectErrorMapToErrorMap, type EffectErrorMap } from "./tagged-error";
@@ -30,7 +30,7 @@ interface EnhanceEffectRouterOptions<
   middlewares: readonly AnyMiddleware[];
   errorMap: TEffectErrorMap;
   dedupeLeadingMiddlewares: boolean;
-  runtime: ManagedRuntime<TRequirementsProvided, TRuntimeError>;
+  runtime: ManagedRuntime.ManagedRuntime<TRequirementsProvided, TRuntimeError>;
 }
 
 export function enhanceEffectRouter<

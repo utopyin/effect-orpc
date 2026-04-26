@@ -1,6 +1,6 @@
 {
   "name": "effect-orpc",
-  "version": "0.2.0",
+  "version": "1.0.0-effect-v4.4",
   "keywords": [
     "effect",
     "orpc",
@@ -48,7 +48,7 @@
   },
   "devDependencies": {
     "@types/bun": "latest",
-    "effect": "^3.18.4",
+    "effect": "4.0.0-beta.57",
     "oxfmt": "^0.21.0",
     "oxlint": "^1.36.0",
     "tsup": "^8.5.1",
@@ -60,7 +60,7 @@
     "@orpc/contract": ">=1.13.0",
     "@orpc/server": ">=1.13.0",
     "@orpc/shared": ">=1.13.0",
-    "effect": ">=3.18.0",
+    "effect": ">=4.0.0-beta.57",
     "typescript": "^5"
   }
 }

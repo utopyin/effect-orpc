@@ -1,11 +1,11 @@
 import { ORPCError } from "@orpc/contract";
 import type {
-  Context,
+  Context as ORPCContext,
   ProcedureHandler,
   ProcedureHandlerOptions,
 } from "@orpc/server";
 import type { ManagedRuntime } from "effect";
-import { Cause, Effect, Exit, Result, ServiceMap } from "effect";
+import { Cause, Effect, Exit, Result, Context } from "effect";
 
 import { getCurrentServices } from "./service-context-bridge";
 import type { EffectErrorConstructorMap, EffectErrorMap } from "./tagged-error";
@@ -65,7 +65,7 @@ export function toORPCErrorFromCause(
 }
 
 export function createEffectProcedureHandler<
-  TCurrentContext extends Context,
+  TCurrentContext extends ORPCContext,
   TInput,
   TOutput,
   TEffectErrorMap extends EffectErrorMap,
@@ -127,7 +127,7 @@ export function createEffectProcedureHandler<
     const parentServices = getCurrentServices();
     const exit = parentServices
       ? await Effect.runPromiseExitWith(
-          ServiceMap.merge(await runtime.services(), parentServices),
+          Context.merge(await runtime.context(), parentServices),
         )(tracedEffect, {
           signal: opts.signal,
         })

@@ -1,7 +1,7 @@
-import type { ServiceMap } from "effect";
+import type { Context } from "effect";
 
 export interface ServiceContextBridge {
-  readonly getCurrentServices: () => ServiceMap.ServiceMap<any> | undefined;
+  readonly getCurrentServices: () => Context.Context<any> | undefined;
 }
 
 let bridge: ServiceContextBridge | undefined;
@@ -12,6 +12,6 @@ export function installServiceContextBridge(
   bridge = nextBridge;
 }
 
-export function getCurrentServices(): ServiceMap.ServiceMap<any> | undefined {
+export function getCurrentServices(): Context.Context<any> | undefined {
   return bridge?.getCurrentServices();
 }

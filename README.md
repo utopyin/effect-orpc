@@ -29,7 +29,7 @@ Runnable demos live in the repository's `examples/` directory.
 
 ```ts
 import { os } from "@orpc/server";
-import { Effect, Layer, ManagedRuntime, ServiceMap } from "effect";
+import { Effect, Layer, ManagedRuntime, Context } from "effect";
 import { makeEffectORPC, ORPCTaggedError } from "effect-orpc";
 
 interface User {
@@ -53,7 +53,7 @@ const authedOs = os
   });
 
 // Define your services
-class UsersRepo extends ServiceMap.Service<
+class UsersRepo extends Context.Service<
   UsersRepo,
   {
     readonly get: (id: number) => User | undefined;
@@ -99,17 +99,17 @@ export type Router = typeof router;
 The wrapper enforces that Effect procedures only use services provided by the `ManagedRuntime`. If you try to use a service that isn't in the runtime, you'll get a compile-time error:
 
 ```ts
-import { Effect, Layer, ManagedRuntime, ServiceMap } from "effect";
+import { Effect, Layer, ManagedRuntime, Context } from "effect";
 import { makeEffectORPC } from "effect-orpc";
 
-class ProvidedService extends ServiceMap.Service<
+class ProvidedService extends Context.Service<
   ProvidedService,
   {
     readonly doSomething: () => Effect.Effect<string>;
   }
 >()("ProvidedService") {}
 
-class MissingService extends ServiceMap.Service<
+class MissingService extends Context.Service<
   MissingService,
   {
     readonly doSomething: () => Effect.Effect<string>;

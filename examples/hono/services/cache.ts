@@ -1,8 +1,8 @@
-import { Effect, Layer, ServiceMap } from "effect";
+import { Effect, Layer, Context } from "effect";
 
 import { DatabaseService } from "./database";
 
-export class CacheService extends ServiceMap.Service<
+export class CacheService extends Context.Service<
   CacheService,
   {
     readonly get: (key: string) => Effect.Effect<unknown>;

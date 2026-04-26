@@ -1,13 +1,13 @@
 import { oc, type InferSchemaOutput } from "@orpc/contract";
 import { call, ORPCError, type Router } from "@orpc/server";
-import { Effect, Layer, ManagedRuntime, ServiceMap } from "effect";
+import { Effect, Layer, ManagedRuntime, Context } from "effect";
 import { describe, expect, expectTypeOf, it } from "vitest";
 import z from "zod";
 
 import { eoc, implementEffect, ORPCTaggedError } from "../index";
 import { withFiberContext } from "../node";
 
-class Counter extends ServiceMap.Service<
+class Counter extends Context.Service<
   Counter,
   {
     readonly increment: (n: number) => Effect.Effect<number>;
@@ -18,7 +18,7 @@ class Counter extends ServiceMap.Service<
   });
 }
 
-const RequestId = ServiceMap.Reference<string>("RequestId", {
+const RequestId = Context.Reference<string>("RequestId", {
   defaultValue: () => "missing",
 });
 

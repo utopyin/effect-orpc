@@ -1,7 +1,7 @@
 import type { InferSchemaOutput } from "@orpc/contract";
 import { isContractProcedure } from "@orpc/contract";
 import { os } from "@orpc/server";
-import { Effect, Layer, ManagedRuntime, ServiceMap } from "effect";
+import { Effect, Layer, ManagedRuntime, Context } from "effect";
 import { beforeEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 import z from "zod";
 
@@ -20,7 +20,7 @@ import {
 
 const mid = vi.fn();
 const runtime = ManagedRuntime.make(Layer.empty);
-const RequestId = ServiceMap.Reference<string>("RequestId", {
+const RequestId = Context.Reference<string>("RequestId", {
   defaultValue: () => "missing",
 });
 
@@ -216,7 +216,7 @@ describe("effectBuilder", () => {
   });
 
   it("merges runtime services with captured request context", async () => {
-    class Counter extends ServiceMap.Service<
+    class Counter extends Context.Service<
       Counter,
       {
         readonly increment: (n: number) => Effect.Effect<number>;
@@ -405,7 +405,7 @@ describe("makeEffectORPC factory", () => {
 describe("effect with services", () => {
   it("can use services from runtime layer", async () => {
     // Define a simple service
-    class Counter extends ServiceMap.Service<
+    class Counter extends Context.Service<
       Counter,
       {
         readonly increment: (n: number) => Effect.Effect<number>;
@@ -603,7 +603,7 @@ describe("default tracing (without .traced())", () => {
   });
 
   it("default tracing works with services from runtime", async () => {
-    class Greeter extends ServiceMap.Service<
+    class Greeter extends Context.Service<
       Greeter,
       {
         readonly greet: (name: string) => Effect.Effect<string>;

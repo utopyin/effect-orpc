@@ -1,4 +1,4 @@
-import { Effect, Layer, ServiceMap } from "effect";
+import { Effect, Layer, Context } from "effect";
 
 import { CacheService } from "./cache";
 
@@ -15,7 +15,7 @@ const HARDCODED_ORDERS: Record<
   "ORD-003": { id: "ORD-003", items: ["headphones"], status: "delivered" },
 };
 
-export class OrderService extends ServiceMap.Service<
+export class OrderService extends Context.Service<
   OrderService,
   {
     readonly getOrder: (

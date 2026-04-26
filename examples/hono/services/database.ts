@@ -1,6 +1,6 @@
-import { Effect, Layer, ServiceMap } from "effect";
+import { Effect, Layer, Context } from "effect";
 
-export class DatabaseService extends ServiceMap.Service<
+export class DatabaseService extends Context.Service<
   DatabaseService,
   {
     readonly query: (

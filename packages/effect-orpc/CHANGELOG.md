@@ -1,5 +1,11 @@
 # effect-orpc
 
+## 1.0.0-effect-v4.4
+
+### Patch Changes
+
+- 19b48ed: Support latest effect-v4 version (4.0.0-beta.57)
+
 ## 1.0.0-effect-v4.3
 
 ### Patch Changes

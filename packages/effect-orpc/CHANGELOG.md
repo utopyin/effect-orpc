@@ -1,5 +1,12 @@
 # effect-orpc
 
+## 1.0.0-effect-v4.5
+
+### Patch Changes
+
+- 2c5477e: Support latest effect-v4 beta version to date (4.0.0-beta.65)
+- Port the proxy-based Effect builder and procedure compatibility layer to the Effect v4 prerelease line, preserving upstream oRPC parity while keeping Effect v4 runtime, error, and request-context behavior.
+
 ## 1.0.0-effect-v4.4
 
 ### Patch Changes

@@ -1,5 +1,6 @@
 import type { ContractProcedure, Schema } from "@orpc/contract";
 import type {
+  Builder,
   DecoratedMiddleware,
   Middleware,
   MiddlewareOutputFn,
@@ -51,6 +52,22 @@ const withOutput = procedureBuilder.output(outputSchema);
 const withInputOutput = withInput.output(outputSchema);
 
 describe("parity: @orpc/server builder.test-d.ts", () => {
+  it("exposes every upstream builder key", () => {
+    type MissingEffectBuilderKeys = Exclude<
+      keyof Builder<
+        InitialContext,
+        CurrentContext,
+        typeof inputSchema,
+        typeof outputSchema,
+        typeof baseErrorMap,
+        BaseMeta
+      >,
+      keyof typeof typedBuilder
+    >;
+
+    expectTypeOf<MissingEffectBuilderKeys>().toEqualTypeOf<never>();
+  });
+
   it("is a contract procedure", () => {
     expectTypeOf<
       AssertExtends<

@@ -30,6 +30,12 @@
 
 - 045df4a: migrate to effect-v4 (effect-smol)
 
+## 0.2.1
+
+### Patch Changes
+
+- 21b9c8a: Improve Effect builder and procedure compatibility with upstream oRPC by proxying the upstream builder/procedure surfaces while preserving Effect runtime, error map, and tracing metadata.
+
 ## 0.2.0
 
 ### Minor Changes

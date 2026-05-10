@@ -1,5 +1,11 @@
 # effect-orpc
 
+## 0.2.2
+
+### Patch Changes
+
+- 1e2d2c7: Add JSDocs back
+
 ## 0.2.1
 
 ### Patch Changes

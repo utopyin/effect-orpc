@@ -62,11 +62,11 @@
     "@types/better-sqlite3": "^7.6.13",
     "better-sqlite3": "^12.6.2",
     "effect": "workspace:^",
-    "kysely": "^0.28.2"
+    "kysely": "^0.28.17"
   },
   "peerDependencies": {
     "@effect/sql": "workspace:^",
     "effect": "workspace:^",
-    "kysely": "^0.28.2"
+    "kysely": "^0.28.17"
   }
 }

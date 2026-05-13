@@ -60,7 +60,7 @@
     "@testcontainers/mysql": "^10.25.0",
     "@testcontainers/postgresql": "^10.25.0",
     "@types/pg": "^8.15.6",
-    "drizzle-orm": "^0.43.1",
+    "drizzle-orm": "^0.45.2",
     "effect": "workspace:^",
     "pg": "^8.16.3"
   },

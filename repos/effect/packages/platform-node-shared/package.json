@@ -67,6 +67,6 @@
     "@types/tar": "^6.1.12",
     "@types/ws": "^8.18.1",
     "effect": "workspace:^",
-    "tar": "^6"
+    "tar": "^7"
   }
 }

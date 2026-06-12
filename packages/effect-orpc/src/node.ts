@@ -12,12 +12,13 @@ const fiberRefsStorage = new AsyncLocalStorage<FiberRefs.FiberRefs>();
 
 const bridge: FiberContextBridge = {
   getCurrentFiberRefs: () => fiberRefsStorage.getStore(),
+  runWithFiberRefs: (fiberRefs, fn) => fiberRefsStorage.run(fiberRefs, fn),
 };
 
 installFiberContextBridge(bridge);
 
 export function withFiberContext<T>(fn: () => Promise<T>): Effect.Effect<T> {
   return Effect.flatMap(Effect.getFiberRefs, (fiberRefs) =>
-    Effect.promise(() => fiberRefsStorage.run(fiberRefs, fn)),
+    Effect.promise(() => bridge.runWithFiberRefs!(fiberRefs, fn)),
   );
 }

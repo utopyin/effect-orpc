@@ -16,7 +16,7 @@ export const orderSchema = z.object({
   status: orderStatusSchema,
 });
 
-export type Role = z.infer<typeof roleSchema>;
+type Role = z.infer<typeof roleSchema>;
 export type RequestContext = {
   requestId: string;
   role: Role;
@@ -34,12 +34,12 @@ export type ContractMeta = {
   audit?: boolean;
 };
 
-export class OrderNotFoundError extends ORPCTaggedError("OrderNotFoundError", {
+class OrderNotFoundError extends ORPCTaggedError("OrderNotFoundError", {
   code: "NOT_FOUND",
   schema: z.object({ orderId: z.string() }),
 }) {}
 
-export class RoleForbiddenError extends ORPCTaggedError("RoleForbiddenError", {
+class RoleForbiddenError extends ORPCTaggedError("RoleForbiddenError", {
   code: "FORBIDDEN",
   schema: z.object({
     requiredRole: z.string(),

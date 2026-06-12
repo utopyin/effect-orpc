@@ -12,12 +12,21 @@ import {
   outputSchema,
 } from "./shared";
 
+const authMiddleware: Middleware<
+  InitialContext,
+  { auth: boolean },
+  { input: string },
+  unknown,
+  any,
+  BaseMeta
+> = ({ next }) => next({ context: { auth: true as boolean } });
+
 const procedure = makeEffectORPC(runtime)
   .$context<InitialContext>()
   .$meta({ mode: "dev" } as BaseMeta)
   .$input(inputSchema)
   .errors(baseErrorMap)
-  .use(({ next }) => next({ context: { auth: true as boolean } }))
+  .use(authMiddleware)
   .output(outputSchema)
   .effect(function* () {
     return { output: 456 };
@@ -61,13 +70,20 @@ describe("parity: @orpc/server procedure-decorated.test-d.ts", () => {
 
   describe(".use", () => {
     it("without map input", () => {
-      expectTypeOf(
-        procedure.use(({ next }, input, output) => {
-          expectTypeOf(input).toEqualTypeOf<{ input: string }>();
-          expectTypeOf(output).toBeFunction();
-          return next({ context: { extra: true } });
-        }),
-      ).toBeObject();
+      const middleware: Middleware<
+        CurrentContext,
+        { extra: boolean },
+        { input: string },
+        { output: number },
+        any,
+        BaseMeta
+      > = ({ next }, input, output) => {
+        expectTypeOf(input).toEqualTypeOf<{ input: string }>();
+        expectTypeOf(output).toBeFunction();
+        return next({ context: { extra: true } });
+      };
+
+      expectTypeOf(procedure.use(middleware)).toBeObject();
 
       procedure.use(
         // @ts-expect-error - invalid TInContext

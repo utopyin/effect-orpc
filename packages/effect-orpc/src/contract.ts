@@ -27,13 +27,15 @@ import type {
 } from "@orpc/server";
 import { implement } from "@orpc/server";
 import type { IntersectPick } from "@orpc/shared";
-import type { ManagedRuntime } from "effect";
+import type { Layer, ManagedRuntime } from "effect";
 
 import { addSpanStackTrace } from "./effect-builder";
 import { enhanceEffectRouter } from "./effect-enhance-router";
 import { EffectDecoratedProcedure } from "./effect-procedure";
 import { createEffectProcedureHandler } from "./effect-runtime";
 import { effectContractSymbol, getEffectContractErrorMap } from "./eoc";
+import type { EffectRuntimeSource } from "./runtime-source";
+import { toManagedRuntime } from "./runtime-source";
 import type { EffectErrorMap } from "./tagged-error";
 import { effectErrorMapToErrorMap } from "./tagged-error";
 import type { EffectErrorMapToErrorMap, EffectProcedureHandler } from "./types";
@@ -469,7 +471,37 @@ export function implementEffect<
   TRuntimeError,
 >(
   contract: TContract,
+  layer: Layer.Layer<TRequirementsProvided, TRuntimeError, never>,
+): EffectImplementer<
+  TContract,
+  Record<never, never>,
+  Record<never, never>,
+  TRequirementsProvided,
+  TRuntimeError
+>;
+
+export function implementEffect<
+  TContract extends AnyContractRouter,
+  TRequirementsProvided,
+  TRuntimeError,
+>(
+  contract: TContract,
   runtime: ManagedRuntime.ManagedRuntime<TRequirementsProvided, TRuntimeError>,
+): EffectImplementer<
+  TContract,
+  Record<never, never>,
+  Record<never, never>,
+  TRequirementsProvided,
+  TRuntimeError
+>;
+
+export function implementEffect<
+  TContract extends AnyContractRouter,
+  TRequirementsProvided,
+  TRuntimeError,
+>(
+  contract: TContract,
+  source: EffectRuntimeSource<TRequirementsProvided, TRuntimeError>,
 ): EffectImplementer<
   TContract,
   Record<never, never>,
@@ -480,7 +512,7 @@ export function implementEffect<
   return wrapContractNode(
     contract,
     implement(contract),
-    runtime,
+    toManagedRuntime(source),
   ) as EffectImplementer<
     TContract,
     Record<never, never>,

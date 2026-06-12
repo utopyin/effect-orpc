@@ -42,9 +42,16 @@ const rootBuilder = makeEffectORPC(runtime)
   .$input(inputSchema)
   .errors(baseErrorMap);
 
-const withMiddlewares = rootBuilder.use(({ next }) =>
-  next({ context: { auth: true as boolean } }),
-);
+const authMiddleware: Middleware<
+  InitialContext,
+  { auth: boolean },
+  { input: string },
+  unknown,
+  any,
+  BaseMeta
+> = ({ next }) => next({ context: { auth: true as boolean } });
+
+const withMiddlewares = rootBuilder.use(authMiddleware);
 
 const procedureBuilder = withMiddlewares.meta(baseMeta);
 const withInput = procedureBuilder.input(inputSchema);

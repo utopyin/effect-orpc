@@ -1,0 +1,24 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "ignore": ["repos/**", "node_modules/**", "packages/*/dist/**"],
+  "workspaces": {
+    ".": {
+      "entry": ["package.json"],
+      "project": ["*.json", "*.js", "*.ts"]
+    },
+    "packages/effect-orpc": {
+      "entry": [
+        "package.json",
+        "src/index.ts",
+        "src/node.ts",
+        "src/tests/**/*.test.ts",
+        "tsup.config.ts"
+      ],
+      "project": ["src/**/*.ts", "tsup.config.ts"]
+    },
+    "examples/hono": {
+      "entry": ["package.json", "index.ts", "rpc-client.test.ts"],
+      "project": ["**/*.ts"]
+    }
+  }
+}

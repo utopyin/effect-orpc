@@ -7,11 +7,15 @@ import type {
 } from "@orpc/contract";
 import type { Context, Router } from "@orpc/server";
 import { Builder, fallbackConfig, lazy } from "@orpc/server";
-import type { ManagedRuntime } from "effect";
+import { Layer, ManagedRuntime } from "effect";
 
 import { enhanceEffectRouter } from "./effect-enhance-router";
 import { EffectDecoratedProcedure } from "./effect-procedure";
-import { createEffectProcedureHandler } from "./effect-runtime";
+import {
+  createEffectPipelineMiddleware,
+  createEffectProcedureHandler,
+  isEffectMiddleware,
+} from "./effect-runtime";
 import {
   createNodeProxy,
   unhandled,
@@ -23,6 +27,8 @@ import {
   unwrapEffectUpstream,
   type EffectProxyTarget,
 } from "./extension/state";
+import type { EffectRuntimeSource } from "./runtime-source";
+import { toManagedRuntime } from "./runtime-source";
 import type { EffectErrorMap, MergedEffectErrorMap } from "./tagged-error";
 import { effectErrorMapToErrorMap } from "./tagged-error";
 import type {
@@ -43,6 +49,9 @@ const builderVirtualDescriptors = {
   errors: { enumerable: false },
   handler: { enumerable: false },
   lazy: { enumerable: false },
+  middleware: { enumerable: false },
+  provide: { enumerable: false },
+  provideOptional: { enumerable: false },
   router: { enumerable: false },
   traced: { enumerable: false },
 } as const;
@@ -51,6 +60,9 @@ const builderVirtualKeys = [
   "~effect",
   "errors",
   "effect",
+  "middleware",
+  "provide",
+  "provideOptional",
   "traced",
   "handler",
   "router",
@@ -96,6 +108,8 @@ function getEffectBuilderDef(
     effectErrorMap: context.state.effectErrorMap,
     runtime: context.state.runtime,
     spanConfig: context.state.spanConfig,
+    effectSteps: context.state.effectSteps,
+    effectHandler: context.state.effectHandler,
   };
 }
 
@@ -109,9 +123,53 @@ function wrapBuilderLike(
       effectErrorMap: state.effectErrorMap,
       runtime: state.runtime,
       spanConfig: state.spanConfig,
+      effectSteps: state.effectSteps,
+      effectHandler: state.effectHandler,
     },
     unwrapEffectUpstream(builder),
   );
+}
+
+function appendEffectStep(
+  state: NodeProxyContext<EffectBuilderTarget, AnyBuilderLike>["state"],
+  step: NonNullable<
+    NodeProxyContext<
+      EffectBuilderTarget,
+      AnyBuilderLike
+    >["state"]["effectSteps"]
+  >[number],
+): NodeProxyContext<EffectBuilderTarget, AnyBuilderLike>["state"] {
+  return {
+    ...state,
+    effectSteps: [...(state.effectSteps ?? []), step],
+  };
+}
+
+function flushEffectSteps(
+  builder: AnyBuilderLike,
+  state: NodeProxyContext<EffectBuilderTarget, AnyBuilderLike>["state"],
+): {
+  builder: AnyBuilderLike;
+  state: NodeProxyContext<EffectBuilderTarget, AnyBuilderLike>["state"];
+} {
+  if (!state.effectSteps?.length) {
+    return { builder, state };
+  }
+
+  const middleware = createEffectPipelineMiddleware({
+    effectErrorMap: state.effectErrorMap,
+    runtime: state.runtime,
+    steps: state.effectSteps,
+  });
+  return {
+    builder: Reflect.apply(Reflect.get(builder, "use", builder), builder, [
+      middleware,
+    ]) as AnyBuilderLike,
+    state: {
+      ...state,
+      effectSteps: undefined,
+    },
+  };
 }
 
 function createEffectBuilderProxy(
@@ -166,18 +224,101 @@ function createEffectBuilderProxy(
               >[0],
             ) => {
               const defaultCaptureStackTrace = addSpanStackTrace();
+              const effectHandler = {
+                defaultCaptureStackTrace,
+                effectFn,
+                spanConfig: state.spanConfig,
+              };
               return new EffectDecoratedProcedure({
                 ...effectDef,
+                effectHandler,
                 handler: async (opts) => {
                   return createEffectProcedureHandler({
                     defaultCaptureStackTrace,
                     effectErrorMap: state.effectErrorMap,
                     effectFn,
+                    effectSteps: state.effectSteps,
                     runtime: state.runtime,
                     spanConfig: state.spanConfig,
                   })(opts as any);
                 },
               });
+            };
+          });
+        case "middleware":
+          return getOrCreateVirtualMethod(context, prop, () => {
+            return (middleware: any) => {
+              if (isEffectMiddleware(middleware)) {
+                const effectMiddleware = createEffectPipelineMiddleware({
+                  effectErrorMap: state.effectErrorMap,
+                  runtime: state.runtime,
+                  steps: [
+                    ...(state.effectSteps ?? []),
+                    { _tag: "middleware" as const, middleware },
+                  ],
+                });
+
+                return Reflect.apply(
+                  Reflect.get(source, "middleware", source),
+                  source,
+                  [effectMiddleware],
+                );
+              }
+
+              return Reflect.apply(
+                Reflect.get(source, "middleware", source),
+                source,
+                [middleware],
+              );
+            };
+          });
+        case "provide":
+          return getOrCreateVirtualMethod(context, prop, () => {
+            return (tagOrLayer: any, provider?: any) => {
+              return wrapBuilderLike(
+                source,
+                appendEffectStep(
+                  state,
+                  Layer.isLayer(tagOrLayer)
+                    ? { _tag: "provideLayer", layer: tagOrLayer }
+                    : { _tag: "provide", provider, tag: tagOrLayer },
+                ),
+              );
+            };
+          });
+        case "provideOptional":
+          return getOrCreateVirtualMethod(context, prop, () => {
+            return (tag: any, provider: any) => {
+              return wrapBuilderLike(
+                source,
+                appendEffectStep(state, {
+                  _tag: "provideOptional",
+                  provider,
+                  tag,
+                }),
+              );
+            };
+          });
+        case "use":
+          return getOrCreateVirtualMethod(context, prop, () => {
+            return (middleware: any, ...rest: unknown[]) => {
+              if (isEffectMiddleware(middleware) && rest.length === 0) {
+                return wrapBuilderLike(
+                  source,
+                  appendEffectStep(state, {
+                    _tag: "middleware",
+                    middleware,
+                  }),
+                );
+              }
+
+              const flushed = flushEffectSteps(source, state);
+              const nextBuilder: AnyBuilderLike = Reflect.apply(
+                Reflect.get(flushed.builder, "use", flushed.builder),
+                flushed.builder,
+                [middleware, ...rest],
+              );
+              return wrapBuilderLike(nextBuilder, flushed.state);
             };
           });
         case "traced":
@@ -458,6 +599,32 @@ export class EffectBuilder<
     TRuntimeError
   >["use"];
   /**
+   * Provides a request-scoped Effect service to downstream procedures.
+   */
+  declare provide: EffectBuilderSurface<
+    TInitialContext,
+    TCurrentContext,
+    TInputSchema,
+    TOutputSchema,
+    TEffectErrorMap,
+    TMeta,
+    TRequirementsProvided,
+    TRuntimeError
+  >["provide"];
+  /**
+   * Optionally provides a request-scoped Effect service to downstream procedures.
+   */
+  declare provideOptional: EffectBuilderSurface<
+    TInitialContext,
+    TCurrentContext,
+    TInputSchema,
+    TOutputSchema,
+    TEffectErrorMap,
+    TMeta,
+    TRequirementsProvided,
+    TRuntimeError
+  >["provideOptional"];
+  /**
    * Sets or updates the metadata.
    * The provided metadata is spared-merged with any existing metadata.
    *
@@ -659,9 +826,12 @@ export class EffectBuilder<
     >,
     builder?: AnyBuilderLike,
   ) {
-    const { runtime, spanConfig, effectErrorMap, ...orpcDef } = def;
+    const { runtime, spanConfig, effectErrorMap, effectSteps, ...orpcDef } =
+      def;
 
     attachEffectState(this, builder ?? new Builder(orpcDef), {
+      effectSteps,
+      effectHandler: def.effectHandler,
       effectErrorMap,
       runtime,
       spanConfig,
@@ -672,22 +842,75 @@ export class EffectBuilder<
 }
 
 /**
- * Creates an Effect-aware procedure builder with the specified ManagedRuntime.
+ * Creates an Effect-aware procedure builder with the specified Layer.
  * Uses the default builder shape from `@orpc/server`.
  *
- * @param runtime - The ManagedRuntime that provides services for Effect procedures
+ * @param layer - The Layer that provides services for Effect procedures
  * @returns An EffectBuilder instance for creating Effect-native procedures
  *
  * @example
  * ```ts
  * import { makeEffectORPC } from '@orpc/effect'
- * import { Effect, Layer, ManagedRuntime } from 'effect'
+ * import { Effect, Layer } from 'effect'
  *
- * const runtime = ManagedRuntime.make(Layer.empty)
- * const effectOs = makeEffectORPC(runtime)
+ * const effectOs = makeEffectORPC(Layer.empty)
  *
  * const hello = effectOs.effect(() => Effect.succeed('Hello!'))
  * ```
+ */
+export function makeEffectORPC(): EffectBuilder<
+  Context,
+  Context,
+  Schema<unknown, unknown>,
+  Schema<unknown, unknown>,
+  Record<never, never>,
+  Record<never, never>,
+  never,
+  never
+>;
+
+export function makeEffectORPC<
+  TBuilder extends AnyBuilderLike<
+    TInputSchema,
+    TOutputSchema,
+    TErrorMap,
+    TMeta
+  >,
+  TInputSchema extends AnySchema,
+  TOutputSchema extends AnySchema,
+  TErrorMap extends ErrorMap,
+  TMeta extends Meta,
+>(
+  builder: TBuilder,
+): EffectBuilder<
+  InferBuilderInitialContext<TBuilder>,
+  InferBuilderCurrentContext<TBuilder>,
+  InferBuilderInputSchema<TBuilder>,
+  InferBuilderOutputSchema<TBuilder>,
+  InferBuilderErrorMap<TBuilder>,
+  InferBuilderMeta<TBuilder>,
+  never,
+  never
+>;
+
+export function makeEffectORPC<TRequirementsProvided, TRuntimeError>(
+  layer: Layer.Layer<TRequirementsProvided, TRuntimeError, never>,
+): EffectBuilder<
+  Context,
+  Context,
+  Schema<unknown, unknown>,
+  Schema<unknown, unknown>,
+  Record<never, never>,
+  Record<never, never>,
+  TRequirementsProvided,
+  TRuntimeError
+>;
+
+/**
+ * Creates an Effect-aware procedure builder with the specified ManagedRuntime.
+ * Uses the default builder shape from `@orpc/server`.
+ *
+ * @param runtime - The ManagedRuntime that provides services for Effect procedures
  */
 export function makeEffectORPC<TRequirementsProvided, TRuntimeError>(
   runtime: ManagedRuntime.ManagedRuntime<TRequirementsProvided, TRuntimeError>,
@@ -704,9 +927,9 @@ export function makeEffectORPC<TRequirementsProvided, TRuntimeError>(
 
 /**
  * Creates an Effect-aware procedure builder by wrapping an existing oRPC Builder
- * with the specified ManagedRuntime.
+ * with the specified Layer.
  *
- * @param runtime - The ManagedRuntime that provides services for Effect procedures
+ * @param layer - The Layer that provides services for Effect procedures
  * @param builder - The oRPC Builder instance to wrap (e.g., a customized `os`)
  * @returns An EffectBuilder instance that extends the original builder with Effect support
  *
@@ -714,14 +937,13 @@ export function makeEffectORPC<TRequirementsProvided, TRuntimeError>(
  * ```ts
  * import { makeEffectORPC } from '@orpc/effect'
  * import { os } from '@orpc/server'
- * import { Effect, Layer, ManagedRuntime } from 'effect'
+ * import { Effect, Layer } from 'effect'
  *
  * // Create a customized builder
  * const authedOs = os.use(authMiddleware)
  *
  * // Wrap it with Effect support
- * const runtime = ManagedRuntime.make(UserServiceLive)
- * const effectOs = makeEffectORPC(runtime, authedOs)
+ * const effectOs = makeEffectORPC(UserServiceLive, authedOs)
  *
  * const getUser = effectOs
  *   .input(z.object({ id: z.string() }))
@@ -732,6 +954,40 @@ export function makeEffectORPC<TRequirementsProvided, TRuntimeError>(
  *     })
  *   )
  * ```
+ */
+export function makeEffectORPC<
+  TBuilder extends AnyBuilderLike<
+    TInputSchema,
+    TOutputSchema,
+    TErrorMap,
+    TMeta
+  >,
+  TInputSchema extends AnySchema,
+  TOutputSchema extends AnySchema,
+  TErrorMap extends ErrorMap,
+  TMeta extends Meta,
+  TRequirementsProvided,
+  TRuntimeError,
+>(
+  layer: Layer.Layer<TRequirementsProvided, TRuntimeError, never>,
+  builder: TBuilder,
+): EffectBuilder<
+  InferBuilderInitialContext<TBuilder>,
+  InferBuilderCurrentContext<TBuilder>,
+  InferBuilderInputSchema<TBuilder>,
+  InferBuilderOutputSchema<TBuilder>,
+  InferBuilderErrorMap<TBuilder>,
+  InferBuilderMeta<TBuilder>,
+  TRequirementsProvided,
+  TRuntimeError
+>;
+
+/**
+ * Creates an Effect-aware procedure builder by wrapping an existing oRPC Builder
+ * with the specified ManagedRuntime.
+ *
+ * @param runtime - The ManagedRuntime that provides services for Effect procedures
+ * @param builder - The oRPC Builder instance to wrap (e.g., a customized `os`)
  */
 export function makeEffectORPC<
   TBuilder extends AnyBuilderLike<
@@ -760,21 +1016,18 @@ export function makeEffectORPC<
   TRuntimeError
 >;
 
-export function makeEffectORPC<TRequirementsProvided, TRuntimeError>(
-  runtime: ManagedRuntime.ManagedRuntime<TRequirementsProvided, TRuntimeError>,
+export function makeEffectORPC(
+  source?: EffectRuntimeSource<any, any> | AnyBuilderLike,
   builder?: AnyBuilderLike,
-): EffectBuilder<
-  any,
-  any,
-  any,
-  any,
-  any,
-  any,
-  TRequirementsProvided,
-  TRuntimeError
-> {
-  const resolvedBuilder = builder ?? emptyBuilder();
+): any {
+  const sourceIsBuilder = source !== undefined && isBuilderLike(source);
+  const resolvedBuilder = sourceIsBuilder
+    ? source
+    : (builder ?? emptyBuilder());
   const effectErrorMap = getEffectErrorMap(resolvedBuilder);
+  const runtime = toManagedRuntime(
+    sourceIsBuilder || source === undefined ? Layer.empty : source,
+  );
   return new EffectBuilder(
     {
       ...resolvedBuilder["~orpc"],

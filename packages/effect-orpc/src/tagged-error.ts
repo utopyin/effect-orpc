@@ -341,7 +341,7 @@ export function ORPCTaggedError<
  *
  * @example
  * ```ts
- * const handler = effectOs.effect(function* () {
+ * const handler = effectProcedure.effect(function* () {
  *   const result = yield* someOperation.pipe(
  *     Effect.catchTag('UserNotFoundError', (e) =>
  *       Effect.fail(toORPCError(e))

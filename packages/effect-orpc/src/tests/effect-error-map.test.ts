@@ -193,10 +193,10 @@ describe("effectErrorMapToErrorMap", () => {
 
 describe("effectBuilder with EffectErrorMap", () => {
   const runtime = ManagedRuntime.make(Layer.empty);
-  const effectOs = makeEffectORPC(runtime);
+  const effectProcedure = makeEffectORPC(runtime);
 
   it("should support errors() with traditional format", () => {
-    const builder = effectOs.errors({
+    const builder = effectProcedure.errors({
       BAD_REQUEST: { status: 400, message: "Bad request" },
     });
 
@@ -206,7 +206,7 @@ describe("effectBuilder with EffectErrorMap", () => {
   });
 
   it("should support errors() with tagged error classes", () => {
-    const builder = effectOs.errors({
+    const builder = effectProcedure.errors({
       USER_NOT_FOUND_ERROR: UserNotFoundError,
       FORBIDDEN: PermissionDenied,
     });
@@ -218,7 +218,7 @@ describe("effectBuilder with EffectErrorMap", () => {
   });
 
   it("should support mixed error format", () => {
-    const builder = effectOs.errors({
+    const builder = effectProcedure.errors({
       BAD_REQUEST: { status: 400 },
       USER_NOT_FOUND_ERROR: UserNotFoundError,
     });
@@ -232,7 +232,7 @@ describe("effectBuilder with EffectErrorMap", () => {
   });
 
   it("should merge errors correctly", () => {
-    const builder = effectOs
+    const builder = effectProcedure
       .errors({ BAD_REQUEST: { status: 400 } })
       .errors({ USER_NOT_FOUND_ERROR: UserNotFoundError })
       .errors({ FORBIDDEN: PermissionDenied });
@@ -245,7 +245,7 @@ describe("effectBuilder with EffectErrorMap", () => {
   });
 
   it("should create procedure with effect handler", async () => {
-    const procedure = effectOs
+    const procedure = effectProcedure
       .errors({
         USER_NOT_FOUND_ERROR: UserNotFoundError,
         BAD_REQUEST: { status: 400 },
@@ -267,7 +267,7 @@ describe("effectBuilder with EffectErrorMap", () => {
   });
 
   it("should allow throwing tagged errors in effect handler", async () => {
-    const procedure = effectOs
+    const procedure = effectProcedure
       .errors({
         USER_NOT_FOUND_ERROR: UserNotFoundError,
       })
@@ -310,10 +310,10 @@ describe("effectBuilder with EffectErrorMap", () => {
 
 describe("effectDecoratedProcedure.errors()", () => {
   const runtime = ManagedRuntime.make(Layer.empty);
-  const effectOs = makeEffectORPC(runtime);
+  const effectProcedure = makeEffectORPC(runtime);
 
   it("should support adding errors to procedure", () => {
-    const procedure = effectOs
+    const procedure = effectProcedure
       .input(z.object({ id: z.string() }))
       .effect(function* ({ input }) {
         return { id: input.id };
@@ -326,7 +326,7 @@ describe("effectDecoratedProcedure.errors()", () => {
   });
 
   it("should merge errors on procedure", () => {
-    const procedure = effectOs
+    const procedure = effectProcedure
       .errors({ BAD_REQUEST: { status: 400 } })
       .input(z.object({ id: z.string() }))
       .effect(function* ({ input }) {

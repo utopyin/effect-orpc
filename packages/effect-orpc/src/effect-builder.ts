@@ -28,7 +28,7 @@ import {
   type EffectProxyTarget,
 } from "./extension/state";
 import type { EffectRuntimeSource } from "./runtime-source";
-import { toManagedRuntime } from "./runtime-source";
+import { makeEffectRuntimeRunner } from "./runtime-source";
 import type { EffectErrorMap, MergedEffectErrorMap } from "./tagged-error";
 import { effectErrorMapToErrorMap } from "./tagged-error";
 import type {
@@ -106,7 +106,7 @@ function getEffectBuilderDef(
   return {
     ...context.upstream["~orpc"],
     effectErrorMap: context.state.effectErrorMap,
-    runtime: context.state.runtime,
+    runner: context.state.runner,
     spanConfig: context.state.spanConfig,
     effectSteps: context.state.effectSteps,
     effectHandler: context.state.effectHandler,
@@ -121,7 +121,7 @@ function wrapBuilderLike(
     {
       ...builder["~orpc"],
       effectErrorMap: state.effectErrorMap,
-      runtime: state.runtime,
+      runner: state.runner,
       spanConfig: state.spanConfig,
       effectSteps: state.effectSteps,
       effectHandler: state.effectHandler,
@@ -158,7 +158,7 @@ function flushEffectSteps(
 
   const middleware = createEffectPipelineMiddleware({
     effectErrorMap: state.effectErrorMap,
-    runtime: state.runtime,
+    runner: state.runner,
     steps: state.effectSteps,
   });
   return {
@@ -238,7 +238,7 @@ function createEffectBuilderProxy(
                     effectErrorMap: state.effectErrorMap,
                     effectFn,
                     effectSteps: state.effectSteps,
-                    runtime: state.runtime,
+                    runner: state.runner,
                     spanConfig: state.spanConfig,
                   })(opts as any);
                 },
@@ -251,7 +251,7 @@ function createEffectBuilderProxy(
               if (isEffectMiddleware(middleware)) {
                 const effectMiddleware = createEffectPipelineMiddleware({
                   effectErrorMap: state.effectErrorMap,
-                  runtime: state.runtime,
+                  runner: state.runner,
                   steps: [
                     ...(state.effectSteps ?? []),
                     { _tag: "middleware" as const, middleware },
@@ -698,7 +698,7 @@ export class EffectBuilder<
    *
    * @example
    * ```ts
-   * const getUser = effectOs
+   * const getUser = effectProcedure
    *   .input(z.object({ id: z.string() }))
    *   .traced('users.getUser')
    *   .effect(function* ({ input }) {
@@ -734,7 +734,7 @@ export class EffectBuilder<
   >["handler"];
   /**
    * Defines the handler of the procedure using an Effect.
-   * The Effect is executed using the ManagedRuntime provided during builder creation.
+   * The Effect is executed using the configured Effect runtime source.
    * The effect is automatically wrapped with `Effect.withSpan`.
    *
    * @see {@link https://orpc.dev/docs/procedure Procedure Docs}
@@ -826,14 +826,13 @@ export class EffectBuilder<
     >,
     builder?: AnyBuilderLike,
   ) {
-    const { runtime, spanConfig, effectErrorMap, effectSteps, ...orpcDef } =
-      def;
+    const { runner, spanConfig, effectErrorMap, effectSteps, ...orpcDef } = def;
 
     attachEffectState(this, builder ?? new Builder(orpcDef), {
       effectSteps,
       effectHandler: def.effectHandler,
       effectErrorMap,
-      runtime,
+      runner,
       spanConfig,
     });
 
@@ -853,9 +852,9 @@ export class EffectBuilder<
  * import { makeEffectORPC } from '@orpc/effect'
  * import { Effect, Layer } from 'effect'
  *
- * const effectOs = makeEffectORPC(Layer.empty)
+ * const effectProcedure = makeEffectORPC(Layer.empty)
  *
- * const hello = effectOs.effect(() => Effect.succeed('Hello!'))
+ * const hello = effectProcedure.effect(() => Effect.succeed('Hello!'))
  * ```
  */
 export function makeEffectORPC(): EffectBuilder<
@@ -943,9 +942,9 @@ export function makeEffectORPC<TRequirementsProvided, TRuntimeError>(
  * const authedOs = os.use(authMiddleware)
  *
  * // Wrap it with Effect support
- * const effectOs = makeEffectORPC(UserServiceLive, authedOs)
+ * const effectProcedure = makeEffectORPC(UserServiceLive, authedOs)
  *
- * const getUser = effectOs
+ * const getUser = effectProcedure
  *   .input(z.object({ id: z.string() }))
  *   .effect(
  *     Effect.fn(function* ({ input }) {
@@ -1025,15 +1024,16 @@ export function makeEffectORPC(
     ? source
     : (builder ?? emptyBuilder());
   const effectErrorMap = getEffectErrorMap(resolvedBuilder);
-  const runtime = toManagedRuntime(
-    sourceIsBuilder || source === undefined ? Layer.empty : source,
-  );
+  const runner =
+    sourceIsBuilder || source === undefined
+      ? makeEffectRuntimeRunner()
+      : makeEffectRuntimeRunner(source);
   return new EffectBuilder(
     {
       ...resolvedBuilder["~orpc"],
       effectErrorMap: effectErrorMap,
       errorMap: effectErrorMapToErrorMap(effectErrorMap),
-      runtime,
+      runner,
     },
     unwrapEffectUpstream(resolvedBuilder),
   );
@@ -1051,3 +1051,12 @@ function emptyBuilder(): AnyBuilderLike {
     route: {},
   });
 }
+
+/**
+ * Runtime-less Effect oRPC builder, analogous to oRPC's `os` export.
+ *
+ * Provide application services with `.provide(layer)` or use
+ * `makeEffectORPC(runtime)` when you need explicit ManagedRuntime lifecycle
+ * control.
+ */
+export const eos = makeEffectORPC();

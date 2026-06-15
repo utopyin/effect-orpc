@@ -16,6 +16,7 @@ export type {
 export {
   addSpanStackTrace,
   EffectBuilder,
+  eos,
   makeEffectORPC,
 } from "./effect-builder";
 export { EffectDecoratedProcedure } from "./effect-procedure";

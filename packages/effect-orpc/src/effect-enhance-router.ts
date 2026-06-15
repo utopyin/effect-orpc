@@ -16,10 +16,10 @@ import {
   type Context,
   type Lazyable,
 } from "@orpc/server";
-import type { ManagedRuntime } from "effect/ManagedRuntime";
 
 import { EffectProcedure } from "./effect-procedure";
 import { getEffectErrorMap, unwrapEffectUpstream } from "./extension/state";
+import type { EffectRuntimeRunner } from "./runtime-source";
 import { effectErrorMapToErrorMap, type EffectErrorMap } from "./tagged-error";
 import type { EffectErrorMapToErrorMap, EnhancedEffectRouter } from "./types";
 
@@ -31,7 +31,7 @@ interface EnhanceEffectRouterOptions<
   middlewares: readonly AnyMiddleware[];
   errorMap: TEffectErrorMap;
   dedupeLeadingMiddlewares: boolean;
-  runtime: ManagedRuntime<TRequirementsProvided, TRuntimeError>;
+  runner: EffectRuntimeRunner<TRequirementsProvided, TRuntimeError>;
 }
 
 export function enhanceEffectRouter<
@@ -97,7 +97,7 @@ export function enhanceEffectRouter<
         source["~orpc"].inputValidationIndex + newMiddlewareAdded,
       outputValidationIndex:
         source["~orpc"].outputValidationIndex + newMiddlewareAdded,
-      runtime: options.runtime,
+      runner: options.runner,
     }) as any;
   }
 

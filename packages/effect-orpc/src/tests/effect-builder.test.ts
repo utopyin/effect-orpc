@@ -12,9 +12,10 @@ import {
 import { beforeEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 import z from "zod";
 
-import { EffectBuilder, makeEffectORPC } from "../effect-builder";
+import { EffectBuilder, eos, makeEffectORPC } from "../effect-builder";
 import { EffectDecoratedProcedure } from "../effect-procedure";
 import { withFiberContext } from "../node";
+import { makeEffectRuntimeRunner } from "../runtime-source";
 import { ORPCTaggedError, effectErrorMapToErrorMap } from "../tagged-error";
 import {
   baseErrorMap,
@@ -27,6 +28,7 @@ import {
 
 const mid = vi.fn();
 const runtime = ManagedRuntime.make(Layer.empty);
+const runner = makeEffectRuntimeRunner(runtime);
 
 const def = {
   config: {
@@ -43,6 +45,7 @@ const def = {
   outputValidationIndex: 88,
   route: baseRoute,
   dedupeLeadingMiddlewares: true,
+  runner,
   runtime,
 };
 
@@ -142,7 +145,7 @@ describe("effectBuilder", () => {
     const applied = builder.effect(effectFn);
 
     expect(applied).instanceOf(EffectDecoratedProcedure);
-    expect(applied["~effect"].runtime).toBe(runtime);
+    expect(applied["~effect"].runner.runtime).toBe(runtime);
     expect(applied["~effect"].handler).toBeInstanceOf(Function);
   });
 
@@ -271,7 +274,7 @@ describe("makeEffectORPC factory", () => {
     const effectBuilder = makeEffectORPC(runtime);
 
     expect(effectBuilder).instanceOf(EffectBuilder);
-    expect(effectBuilder["~effect"].runtime).toBe(runtime);
+    expect(effectBuilder["~effect"].runner.runtime).toBe(runtime);
     // Should inherit os's default definition
     expect(effectBuilder["~effect"].middlewares).toEqual(
       os["~orpc"].middlewares,
@@ -285,13 +288,53 @@ describe("makeEffectORPC factory", () => {
     const effectBuilder = makeEffectORPC(runtime, os);
 
     expect(effectBuilder).instanceOf(EffectBuilder);
-    expect(effectBuilder["~effect"].runtime).toBe(runtime);
+    expect(effectBuilder["~effect"].runner.runtime).toBe(runtime);
     expect(effectBuilder["~effect"].middlewares).toEqual(
       os["~orpc"].middlewares,
     );
     expect(effectBuilder["~effect"].effectErrorMap).toEqual(
       os["~orpc"].errorMap,
     );
+  });
+
+  it("exports an eos builder that works with provide", async () => {
+    class Counter extends Effect.Tag("EosCounter")<
+      Counter,
+      { increment: (n: number) => Effect.Effect<number> }
+    >() {}
+
+    const procedure = eos
+      .provide(
+        Layer.succeed(Counter, {
+          increment: (n: number) => Effect.succeed(n + 1),
+        }),
+      )
+      .input(z.number())
+      .effect(function* ({ input }) {
+        const counter = yield* Counter;
+        return yield* counter.increment(input as number);
+      });
+
+    expect(eos["~effect"].runner.runtime).toBeUndefined();
+    await expect(call(procedure, 5)).resolves.toBe(6);
+  });
+
+  it("does not own a ManagedRuntime when no source is provided", () => {
+    const effectBuilder = makeEffectORPC();
+
+    expect(effectBuilder["~effect"].runner.runtime).toBeUndefined();
+  });
+
+  it("does not own a ManagedRuntime when only a builder is provided", () => {
+    const effectBuilder = makeEffectORPC(os);
+
+    expect(effectBuilder["~effect"].runner.runtime).toBeUndefined();
+  });
+
+  it("does not own a ManagedRuntime when a Layer is provided", () => {
+    const effectBuilder = makeEffectORPC(Layer.empty);
+
+    expect(effectBuilder["~effect"].runner.runtime).toBeUndefined();
   });
 
   it("creates working procedure with default os", async () => {
@@ -427,11 +470,8 @@ describe("effect with services", () => {
       return yield* counter.increment(input as number);
     });
 
-    try {
-      await expect(call(procedure, 5)).resolves.toBe(6);
-    } finally {
-      await effectBuilder["~effect"].runtime.dispose();
-    }
+    expect(effectBuilder["~effect"].runner.runtime).toBeUndefined();
+    await expect(call(procedure, 5)).resolves.toBe(6);
   });
 
   it("can start without a runtime and provide a Layer", async () => {
@@ -451,11 +491,8 @@ describe("effect with services", () => {
       return yield* counter.increment(input as number);
     });
 
-    try {
-      await expect(call(procedure, 5)).resolves.toBe(6);
-    } finally {
-      await effectBuilder["~effect"].runtime.dispose();
-    }
+    expect(effectBuilder["~effect"].runner.runtime).toBeUndefined();
+    await expect(call(procedure, 5)).resolves.toBe(6);
   });
 
   it("can wrap a custom builder without a runtime and provide a Layer", async () => {
@@ -482,14 +519,11 @@ describe("effect with services", () => {
       };
     });
 
-    try {
-      await expect(call(procedure, 5)).resolves.toEqual({
-        fromCustomBuilder: true,
-        value: 6,
-      });
-    } finally {
-      await effectBuilder["~effect"].runtime.dispose();
-    }
+    expect(effectBuilder["~effect"].runner.runtime).toBeUndefined();
+    await expect(call(procedure, 5)).resolves.toEqual({
+      fromCustomBuilder: true,
+      value: 6,
+    });
   });
 
   it(".provide makes a request-scoped service available to handlers", async () => {

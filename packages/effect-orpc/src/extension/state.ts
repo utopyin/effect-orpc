@@ -1,5 +1,4 @@
-import type { ManagedRuntime } from "effect";
-
+import type { EffectRuntimeRunner } from "../runtime-source";
 import type { EffectErrorMap } from "../tagged-error";
 import type {
   EffectPipelineStep,
@@ -17,10 +16,9 @@ export interface EffectExtensionState<
    */
   effectErrorMap: EffectErrorMap;
   /**
-   * The Effect ManagedRuntime that provides services for Effect procedures.
-   * @see {@link ManagedRuntime.ManagedRuntime}
+   * Executes Effect values with the services configured for this builder.
    */
-  runtime: ManagedRuntime.ManagedRuntime<TRequirementsProvided, TRuntimeError>;
+  runner: EffectRuntimeRunner<TRequirementsProvided, TRuntimeError>;
   /**
    * Configuration for Effect span tracing.
    * @see {@link EffectSpanConfig}

@@ -34,8 +34,11 @@ import { enhanceEffectRouter } from "./effect-enhance-router";
 import { EffectDecoratedProcedure } from "./effect-procedure";
 import { createEffectProcedureHandler } from "./effect-runtime";
 import { effectContractSymbol, getEffectContractErrorMap } from "./eoc";
-import type { EffectRuntimeSource } from "./runtime-source";
-import { toManagedRuntime } from "./runtime-source";
+import type {
+  EffectRuntimeRunner,
+  EffectRuntimeSource,
+} from "./runtime-source";
+import { makeEffectRuntimeRunner } from "./runtime-source";
 import type { EffectErrorMap } from "./tagged-error";
 import { effectErrorMapToErrorMap } from "./tagged-error";
 import type { EffectErrorMapToErrorMap, EffectProcedureHandler } from "./types";
@@ -316,13 +319,13 @@ const CONTRACT_HIDDEN_METHODS = new Set([
 ]);
 
 function makeEnhanceOptions<TRequirementsProvided, TRuntimeError>(
-  runtime: ManagedRuntime.ManagedRuntime<TRequirementsProvided, TRuntimeError>,
+  runner: EffectRuntimeRunner<TRequirementsProvided, TRuntimeError>,
 ) {
   return {
     middlewares: [],
     errorMap: {},
     dedupeLeadingMiddlewares: true,
-    runtime,
+    runner,
   } as const;
 }
 
@@ -333,7 +336,7 @@ function wrapContractNode<
 >(
   contract: TContract,
   target: any,
-  runtime: ManagedRuntime.ManagedRuntime<TRequirementsProvided, TRuntimeError>,
+  runner: EffectRuntimeRunner<TRequirementsProvided, TRuntimeError>,
 ): EffectImplementerInternal<
   TContract,
   Context,
@@ -362,9 +365,9 @@ function wrapContractNode<
               ...currentTarget["~orpc"],
               errorMap: effectErrorMapToErrorMap(effectErrorMap),
               effectErrorMap,
-              runtime,
+              runner,
               handler: createEffectProcedureHandler({
-                runtime,
+                runner,
                 effectErrorMap,
                 effectFn,
                 defaultCaptureStackTrace: addSpanStackTrace(),
@@ -385,7 +388,7 @@ function wrapContractNode<
                 currentTarget,
                 args,
               ),
-              runtime,
+              runner,
             );
 
           cache.set(prop, use);
@@ -405,7 +408,7 @@ function wrapContractNode<
                 currentTarget,
                 args,
               ),
-              runtime,
+              runner,
             );
 
           cache.set(prop, wrappedMethod);
@@ -420,7 +423,7 @@ function wrapContractNode<
                 currentTarget,
                 args,
               ) as any,
-              makeEnhanceOptions(runtime),
+              makeEnhanceOptions(runner),
             );
 
           cache.set(prop, wrappedMethod);
@@ -431,7 +434,7 @@ function wrapContractNode<
           const child = wrapContractNode(
             (contract as Record<string, AnyContractRouter>)[prop]!,
             Reflect.get(currentTarget, prop, receiver),
-            runtime,
+            runner,
           );
 
           cache.set(prop, child);
@@ -512,7 +515,7 @@ export function implementEffect<
   return wrapContractNode(
     contract,
     implement(contract),
-    toManagedRuntime(source),
+    makeEffectRuntimeRunner(source),
   ) as EffectImplementer<
     TContract,
     Record<never, never>,

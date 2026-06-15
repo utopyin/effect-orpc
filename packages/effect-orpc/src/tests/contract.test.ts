@@ -76,14 +76,11 @@ describe("implementEffect", () => {
       };
     });
 
-    try {
-      await expect(call(procedure, { amount: 2 })).resolves.toEqual({
-        next: 3,
-        requestId: "layer",
-      });
-    } finally {
-      await procedure["~effect"].runtime.dispose();
-    }
+    expect(procedure["~effect"].runner.runtime).toBeUndefined();
+    await expect(call(procedure, { amount: 2 })).resolves.toEqual({
+      next: 3,
+      requestId: "layer",
+    });
   });
 
   it("preserves contract enforcement at the root router", async () => {

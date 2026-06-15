@@ -17,5 +17,5 @@
   "sortPackageJson": true,
   "sortImports": { "ignoreCase": true },
   "embeddedLanguageFormatting": "auto",
-  "ignorePatterns": [".changeset/**"],
+  "ignorePatterns": [".changeset/**", "repos/**"],
 }

@@ -43,6 +43,12 @@ interface NodeProxyInternalConfig<
     result: unknown,
     receiver: unknown,
   ) => unknown;
+  wrapArgs?: (
+    context: NodeProxyContext<TTarget, TSource>,
+    prop: PropertyKey,
+    args: unknown[],
+    receiver: unknown,
+  ) => unknown[];
 }
 
 /**
@@ -93,6 +99,15 @@ export interface NodeProxyConfig<
     result: unknown,
     receiver: unknown,
   ) => unknown;
+  /**
+   * Rewrites arguments before forwarding upstream methods.
+   */
+  wrapArgs?: (
+    context: NodeProxyContext<TTarget, TSource>,
+    prop: PropertyKey,
+    args: unknown[],
+    receiver: unknown,
+  ) => unknown[];
 }
 
 function createNodeProxyContext<
@@ -124,7 +139,8 @@ function createBoundMethod<
   }
 
   const wrapped = (...args: unknown[]) => {
-    const result = Reflect.apply(value, context.upstream, args);
+    const nextArgs = config.wrapArgs?.(context, prop, args, receiver) ?? args;
+    const result = Reflect.apply(value, context.upstream, nextArgs);
     return config.wrapResult?.(context, prop, result, receiver) ?? result;
   };
 

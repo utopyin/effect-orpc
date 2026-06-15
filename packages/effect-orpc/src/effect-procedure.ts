@@ -9,14 +9,22 @@ import type {
   ProcedureDef,
 } from "@orpc/server";
 import {
+  Procedure,
   addMiddleware,
   createActionableClient,
   createProcedureClient,
   decorateMiddleware,
-  Procedure,
 } from "@orpc/server";
 import type { MaybeOptionalOptions } from "@orpc/shared";
+import { Layer } from "effect";
 
+import {
+  createEffectOptionalProviderMiddleware,
+  createEffectPipelineMiddleware,
+  createEffectProcedureHandler,
+  createEffectProviderMiddleware,
+  isEffectMiddleware,
+} from "./effect-runtime";
 import { composeSurfaceProxy } from "./extension/compose-surfaces";
 import {
   createNodeProxy,
@@ -30,7 +38,11 @@ import {
 } from "./extension/state";
 import type { EffectErrorMap, MergedEffectErrorMap } from "./tagged-error";
 import { effectErrorMapToErrorMap } from "./tagged-error";
-import type { EffectErrorMapToErrorMap, EffectProcedureDef } from "./types";
+import type {
+  EffectErrorMapToErrorMap,
+  EffectPipelineStep,
+  EffectProcedureDef,
+} from "./types";
 import type { EffectDecoratedProcedureSurface } from "./types/effect-procedure-surface";
 
 type AnyProcedureLike = Procedure<any, any, any, any, any, any>;
@@ -66,6 +78,8 @@ const procedureVirtualDescriptors = {
   callable: { enumerable: false },
   errors: { enumerable: false },
   meta: { enumerable: false },
+  provide: { enumerable: false },
+  provideOptional: { enumerable: false },
   route: { enumerable: false },
   use: { enumerable: false },
 } as const;
@@ -75,6 +89,8 @@ const decoratedProcedureVirtualKeys = [
   ...baseProcedureVirtualKeys,
   "errors",
   "meta",
+  "provide",
+  "provideOptional",
   "route",
   "use",
   "callable",
@@ -101,9 +117,67 @@ function getEffectProcedureDef(
 ): EffectProcedureDef<any, any, any, any, any, any, any, any> {
   return {
     ...context.upstream["~orpc"],
+    effectSteps: context.state.effectSteps,
+    effectHandler: context.state.effectHandler,
     effectErrorMap: context.state.effectErrorMap,
     runtime: context.state.runtime,
   };
+}
+
+function makeEffectProcedureHandler(
+  def: EffectProcedureDef<any, any, any, any, any, any, any, any>,
+) {
+  if (!def.effectHandler) {
+    return def.handler;
+  }
+
+  return createEffectProcedureHandler({
+    defaultCaptureStackTrace: def.effectHandler.defaultCaptureStackTrace,
+    effectErrorMap: def.effectErrorMap,
+    effectFn: def.effectHandler.effectFn,
+    effectSteps: def.effectSteps,
+    runtime: def.runtime,
+    spanConfig: def.effectHandler.spanConfig,
+  });
+}
+
+function withRebuiltEffectHandler(
+  def: EffectProcedureDef<any, any, any, any, any, any, any, any>,
+): EffectProcedureDef<any, any, any, any, any, any, any, any> {
+  return {
+    ...def,
+    handler: makeEffectProcedureHandler(def),
+  };
+}
+
+function appendEffectStep(
+  def: EffectProcedureDef<any, any, any, any, any, any, any, any>,
+  step: EffectPipelineStep,
+): EffectProcedureDef<any, any, any, any, any, any, any, any> {
+  return withRebuiltEffectHandler({
+    ...def,
+    effectSteps: [...(def.effectSteps ?? []), step],
+  });
+}
+
+function flushEffectSteps(
+  def: EffectProcedureDef<any, any, any, any, any, any, any, any>,
+): EffectProcedureDef<any, any, any, any, any, any, any, any> {
+  if (!def.effectSteps?.length) {
+    return def;
+  }
+
+  const middleware = createEffectPipelineMiddleware({
+    effectErrorMap: def.effectErrorMap,
+    runtime: def.runtime,
+    steps: def.effectSteps,
+  });
+
+  return withRebuiltEffectHandler({
+    ...def,
+    effectSteps: undefined,
+    middlewares: addMiddleware(def.middlewares, middleware),
+  });
 }
 
 function createEffectProcedureProxy<
@@ -158,22 +232,113 @@ function createEffectProcedureProxy<
                 route: mergeRoute(getEffectProcedureDef(context).route, route),
               });
           });
+        case "provide":
+          return getOrCreateVirtualMethod(context, prop, () => {
+            return (tagOrLayer: any, provider?: any) => {
+              const def = getEffectProcedureDef(context);
+
+              if (Layer.isLayer(tagOrLayer)) {
+                const step = {
+                  _tag: "provideLayer" as const,
+                  layer: tagOrLayer,
+                };
+
+                if (def.effectHandler) {
+                  return new EffectDecoratedProcedure(
+                    appendEffectStep(def, step),
+                  );
+                }
+
+                return new EffectDecoratedProcedure({
+                  ...def,
+                  middlewares: addMiddleware(
+                    def.middlewares,
+                    createEffectPipelineMiddleware({
+                      effectErrorMap: state.effectErrorMap,
+                      runtime: state.runtime,
+                      steps: [step],
+                    }),
+                  ),
+                });
+              }
+
+              if (def.effectHandler) {
+                return new EffectDecoratedProcedure(
+                  appendEffectStep(def, {
+                    _tag: "provide",
+                    provider,
+                    tag: tagOrLayer,
+                  }),
+                );
+              }
+
+              return new EffectDecoratedProcedure({
+                ...def,
+                middlewares: addMiddleware(
+                  def.middlewares,
+                  createEffectProviderMiddleware({
+                    effectErrorMap: state.effectErrorMap,
+                    provider,
+                    runtime: state.runtime,
+                    tag: tagOrLayer,
+                  }),
+                ),
+              });
+            };
+          });
+        case "provideOptional":
+          return getOrCreateVirtualMethod(context, prop, () => {
+            return (tag: any, provider: any) => {
+              const def = getEffectProcedureDef(context);
+
+              if (def.effectHandler) {
+                return new EffectDecoratedProcedure(
+                  appendEffectStep(def, {
+                    _tag: "provideOptional",
+                    provider,
+                    tag,
+                  }),
+                );
+              }
+
+              return new EffectDecoratedProcedure({
+                ...def,
+                middlewares: addMiddleware(
+                  def.middlewares,
+                  createEffectOptionalProviderMiddleware({
+                    effectErrorMap: state.effectErrorMap,
+                    provider,
+                    runtime: state.runtime,
+                    tag,
+                  }),
+                ),
+              });
+            };
+          });
         case "use":
           return getOrCreateVirtualMethod(context, prop, () => {
             return (
               middleware: AnyMiddleware,
               mapInput?: MapInputMiddleware<any, any>,
             ) => {
+              const def = getEffectProcedureDef(context);
+              if (!mapInput && isEffectMiddleware(middleware)) {
+                return new EffectDecoratedProcedure(
+                  appendEffectStep(def, {
+                    _tag: "middleware",
+                    middleware,
+                  }),
+                );
+              }
+
+              const flushedDef = flushEffectSteps(def);
               const mapped = mapInput
                 ? decorateMiddleware(middleware).mapInput(mapInput)
                 : middleware;
 
               return new EffectDecoratedProcedure({
-                ...getEffectProcedureDef(context),
-                middlewares: addMiddleware(
-                  getEffectProcedureDef(context).middlewares,
-                  mapped,
-                ),
+                ...flushedDef,
+                middlewares: addMiddleware(flushedDef.middlewares, mapped),
               });
             };
           });
@@ -278,7 +443,7 @@ export class EffectProcedure<
     TRuntimeError
   >;
   /**
-   * This property holds the defined upstream oRPC options.
+   * This property holds the defined options.
    */
   declare "~orpc": ProcedureDef<
     TInitialContext,
@@ -302,8 +467,11 @@ export class EffectProcedure<
     >,
     procedure?: AnyProcedureLike,
   ) {
-    super(def);
-    attachEffectState(this, procedure ?? new Procedure(def), {
+    const { effectSteps, effectHandler, ...procedureDef } = def;
+    super(procedureDef);
+    attachEffectState(this, procedure ?? new Procedure(procedureDef), {
+      effectSteps,
+      effectHandler,
       effectErrorMap: def.effectErrorMap,
       runtime: def.runtime,
     });
@@ -403,6 +571,32 @@ export class EffectDecoratedProcedure<
     TRuntimeError
   >["route"];
   /**
+   * Provides a request-scoped Effect service to downstream procedures.
+   */
+  declare provide: EffectDecoratedProcedureSurface<
+    TInitialContext,
+    TCurrentContext,
+    TInputSchema,
+    TOutputSchema,
+    TEffectErrorMap,
+    TMeta,
+    TRequirementsProvided,
+    TRuntimeError
+  >["provide"];
+  /**
+   * Optionally provides a request-scoped Effect service to downstream procedures.
+   */
+  declare provideOptional: EffectDecoratedProcedureSurface<
+    TInitialContext,
+    TCurrentContext,
+    TInputSchema,
+    TOutputSchema,
+    TEffectErrorMap,
+    TMeta,
+    TRequirementsProvided,
+    TRuntimeError
+  >["provideOptional"];
+  /**
    * Uses a middleware to modify the context or improve the pipeline.
    *
    * @info Supports both normal middleware and inline middleware implementations.
@@ -421,7 +615,7 @@ export class EffectDecoratedProcedure<
     TRuntimeError
   >["use"];
   /**
-   * Make this procedure callable while still preserving the procedure surface.
+   * Make this procedure callable (works like a function while still being a procedure).
    *
    * @see {@link https://orpc.dev/docs/client/server-side Server-side Client Docs}
    */

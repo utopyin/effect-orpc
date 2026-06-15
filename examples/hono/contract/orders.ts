@@ -8,12 +8,12 @@ import {
   roleSchema,
 } from "./shared";
 
-export const orderListInputSchema = z.object({
+const orderListInputSchema = z.object({
   status: orderStatusSchema.optional(),
   includeItems: z.coerce.boolean().optional().default(true),
 });
 
-export const orderListOutputSchema = z.object({
+const orderListOutputSchema = z.object({
   requestId: z.string(),
   total: z.number(),
   filteredByStatus: orderStatusSchema.optional(),
@@ -31,7 +31,7 @@ export const orderLookupInputSchema = z.object({
   includeItems: z.coerce.boolean().optional().default(true),
 });
 
-export const orderLookupOutputSchema = z.object({
+const orderLookupOutputSchema = z.object({
   requestId: z.string(),
   requestLabel: z.string(),
   order: orderSchema.extend({
@@ -39,13 +39,13 @@ export const orderLookupOutputSchema = z.object({
   }),
 });
 
-export const createDraftInputSchema = z.object({
+const createDraftInputSchema = z.object({
   orderId: z.string().min(3),
   items: z.array(z.string().min(1)).min(1),
   note: z.string().max(120).optional(),
 });
 
-export const createDraftOutputSchema = z.object({
+const createDraftOutputSchema = z.object({
   requestId: z.string(),
   draftId: z.number(),
   order: orderSchema.extend({
@@ -53,23 +53,23 @@ export const createDraftOutputSchema = z.object({
   }),
 });
 
-export const transitionInputSchema = z.object({
+const transitionInputSchema = z.object({
   orderId: z.string().min(1),
   nextStatus: z.enum(["pending", "shipped", "delivered"]),
 });
 
-export const transitionOutputSchema = z.object({
+const transitionOutputSchema = z.object({
   requestId: z.string(),
   previousStatus: orderStatusSchema,
   currentStatus: orderStatusSchema,
   changedBy: roleSchema,
 });
 
-export const warmCacheInputSchema = z.object({
+const warmCacheInputSchema = z.object({
   orderIds: z.array(z.string().min(1)).min(1).max(5),
 });
 
-export const warmCacheOutputSchema = z.object({
+const warmCacheOutputSchema = z.object({
   requestId: z.string(),
   warmed: z.number(),
   orders: z.array(orderSchema),

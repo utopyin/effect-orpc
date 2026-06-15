@@ -18,14 +18,24 @@ import type {
   ProcedureDef,
 } from "@orpc/server";
 import type { IntersectPick, MaybeOptionalOptions } from "@orpc/shared";
+import type { Context as EffectContext, Layer } from "effect";
 
-import type { EffectProcedureDef, EffectErrorMapToErrorMap } from ".";
+import type {
+  EffectErrorMapToErrorMap,
+  EffectOrORPCMiddleware,
+  EffectOptionalProvider,
+  EffectProcedureDef,
+  EffectProvider,
+} from ".";
 import type { EffectDecoratedProcedure } from "../effect-procedure";
 import type {
   EffectErrorConstructorMap,
   EffectErrorMap,
   MergedEffectErrorMap,
 } from "../tagged-error";
+
+type EffectTagIdentifier<T extends EffectContext.Key<any, any>> =
+  T extends EffectContext.Key<infer I, any> ? I : never;
 
 export interface EffectDecoratedProcedureSurface<
   TInitialContext extends Context,
@@ -110,6 +120,93 @@ export interface EffectDecoratedProcedureSurface<
   ): EffectDecoratedProcedure<
     TInitialContext,
     TCurrentContext,
+    TInputSchema,
+    TOutputSchema,
+    TEffectErrorMap,
+    TMeta,
+    TRequirementsProvided,
+    TRuntimeError
+  >;
+  /**
+   * Provides an Effect layer to downstream procedures.
+   */
+  provide<TLayerOut, TLayerError, TLayerIn extends TRequirementsProvided>(
+    layer: Layer.Layer<TLayerOut, TLayerError, TLayerIn>,
+  ): EffectDecoratedProcedure<
+    TInitialContext,
+    TCurrentContext,
+    TInputSchema,
+    TOutputSchema,
+    TEffectErrorMap,
+    TMeta,
+    TRequirementsProvided | TLayerOut,
+    TRuntimeError | TLayerError
+  >;
+  /**
+   * Provides a request-scoped Effect service to downstream procedures.
+   */
+  provide<TTag extends EffectContext.Key<any, any>>(
+    tag: TTag,
+    provider: EffectProvider<
+      TCurrentContext,
+      InferSchemaOutput<TInputSchema>,
+      TEffectErrorMap,
+      TRequirementsProvided,
+      TMeta,
+      TTag
+    >,
+  ): EffectDecoratedProcedure<
+    TInitialContext,
+    TCurrentContext,
+    TInputSchema,
+    TOutputSchema,
+    TEffectErrorMap,
+    TMeta,
+    TRequirementsProvided | EffectTagIdentifier<TTag>,
+    TRuntimeError
+  >;
+  /**
+   * Optionally provides a request-scoped Effect service to downstream procedures.
+   */
+  provideOptional<TTag extends EffectContext.Key<any, any>>(
+    tag: TTag,
+    provider: EffectOptionalProvider<
+      TCurrentContext,
+      InferSchemaOutput<TInputSchema>,
+      TEffectErrorMap,
+      TRequirementsProvided,
+      TMeta,
+      TTag
+    >,
+  ): EffectDecoratedProcedure<
+    TInitialContext,
+    TCurrentContext,
+    TInputSchema,
+    TOutputSchema,
+    TEffectErrorMap,
+    TMeta,
+    TRequirementsProvided,
+    TRuntimeError
+  >;
+  /**
+   * Uses an Effect middleware or native oRPC middleware to modify the context, throw early, or modify the response.
+   */
+  use<
+    UOutContext extends IntersectPick<TCurrentContext, UOutContext>,
+    UInContext extends Context = TCurrentContext,
+  >(
+    middleware: EffectOrORPCMiddleware<
+      UInContext | TCurrentContext,
+      UOutContext,
+      InferSchemaOutput<TInputSchema>,
+      InferSchemaInput<TOutputSchema>,
+      TEffectErrorMap,
+      TRequirementsProvided,
+      TMeta
+    >,
+  ): EffectDecoratedProcedure<
+    MergedInitialContext<TInitialContext, UInContext, TCurrentContext>,
+    MergedCurrentContext<TCurrentContext, UOutContext>,
     TInputSchema,
     TOutputSchema,
     TEffectErrorMap,

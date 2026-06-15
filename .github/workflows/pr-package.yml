@@ -1,0 +1,112 @@
+name: pr-package
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+env:
+  NODE_VERSION: "24"
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build package
+        run: bun run build
+
+      - name: Compute tags
+        id: tags
+        env:
+          EVENT: ${{ github.event_name }}
+          BRANCH: ${{ github.event_name == 'pull_request' && github.head_ref || github.ref_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          short="${SHA:0:7}"
+          tags=("$short" "$SHA" "$BRANCH")
+          if [ "$EVENT" = "pull_request" ]; then
+            tags+=("pr-${PR_NUMBER}")
+          fi
+          json=$(printf '%s\n' "${tags[@]}" | jq -R . | jq -s -c .)
+          echo "tags=$json" >> "$GITHUB_OUTPUT"
+          echo "short=$short" >> "$GITHUB_OUTPUT"
+
+      - name: Publish effect-orpc
+        env:
+          TOKEN: ${{ secrets.PR_PACKAGE_TOKEN }}
+          PR_PACKAGE_URL: ${{ vars.PR_PACKAGE_URL }}
+          TAGS: ${{ steps.tags.outputs.tags }}
+          TTL: ${{ github.event_name == 'pull_request' && '1 week' || '' }}
+        working-directory: packages/effect-orpc
+        run: |
+          set -euo pipefail
+          if [ -z "${TOKEN}" ]; then
+            echo "PR_PACKAGE_TOKEN is required to publish pr-package tarballs." >&2
+            exit 1
+          fi
+          if [ -z "${PR_PACKAGE_URL}" ]; then
+            echo "PR_PACKAGE_URL is required to publish pr-package tarballs." >&2
+            exit 1
+          fi
+          rm -f *.tgz
+          bun pm pack --destination .
+          tgz=$(ls *.tgz)
+          echo "Publishing $tgz with tags $TAGS ttl=${TTL:-default}"
+          curl -fsSL --show-error -X PUT \
+            "${PR_PACKAGE_URL%/}/projects/effect-orpc/packages" \
+            -H "Authorization: Bearer ${TOKEN}" \
+            -H "X-Tags: ${TAGS}" \
+            ${TTL:+-H "X-TTL: ${TTL}"} \
+            -H "Content-Type: application/gzip" \
+            --data-binary "@${tgz}"
+
+      - name: Comment on PR
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          SHORT_SHA: ${{ steps.tags.outputs.short }}
+          PR_PACKAGE_URL: ${{ vars.PR_PACKAGE_URL }}
+        run: |
+          set -euo pipefail
+          if [ -z "${PR_PACKAGE_URL}" ]; then
+            echo "PR_PACKAGE_URL is required to publish pr-package tarballs." >&2
+            exit 1
+          fi
+          MARKER="<!-- pr-package-comment -->"
+          BODY=$(printf '%s\n\nInstall the package built from this commit:\n\n```sh\nbun add effect-orpc@%s/effect-orpc/%s\n```\n' "$MARKER" "${PR_PACKAGE_URL%/}" "$SHORT_SHA")
+
+          existing=$(gh api --paginate \
+            "repos/${REPO}/issues/${PR_NUMBER}/comments" \
+            --jq ".[] | select(.user.login == \"github-actions[bot]\") | select(.body | startswith(\"${MARKER}\")) | .id" \
+            | head -1)
+
+          if [ -n "$existing" ]; then
+            gh api -X PATCH "repos/${REPO}/issues/comments/${existing}" -f body="$BODY"
+          else
+            gh api -X POST "repos/${REPO}/issues/${PR_NUMBER}/comments" -f body="$BODY"
+          fi

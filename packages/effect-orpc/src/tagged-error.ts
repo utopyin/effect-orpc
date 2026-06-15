@@ -371,15 +371,6 @@ export type EffectErrorMapItem =
   | ErrorMapItem<AnySchema>
   | AnyORPCTaggedErrorClass;
 
-export type ORPCTaggedErrorClassToErrorMapItem<T> =
-  T extends ORPCTaggedErrorClass<any, any, infer TData>
-    ? {
-        status?: number;
-        message?: string;
-        data?: TData;
-      }
-    : never;
-
 /**
  * Extended error map that supports both traditional oRPC errors and ORPCTaggedError classes.
  *

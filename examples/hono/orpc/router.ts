@@ -4,7 +4,7 @@ import { onError, ORPCError } from "@orpc/server";
 import { RPCHandler } from "@orpc/server/fetch";
 import { CORSPlugin } from "@orpc/server/plugins";
 import { ZodToJsonSchemaConverter } from "@orpc/zod/zod4";
-import { Effect, pipe } from "effect";
+import { Effect, References } from "effect";
 import { implementEffect, makeEffectORPC } from "effect-orpc";
 import * as z from "zod";
 
@@ -17,7 +17,7 @@ import {
   orderStatusSchema,
   type RequestContext,
 } from "../contract/shared";
-import { runtime } from "../runtime";
+import { AppLive, runtime } from "../runtime";
 import { OrderService } from "../services/order";
 
 export const contract = contractRouterBuilder.router({
@@ -33,7 +33,7 @@ const toTypedOrder = (order: {
 }): z.infer<typeof orderSchema> => orderSchema.parse(order);
 
 const directProcedureBuilder =
-  makeEffectORPC(runtime).$context<RequestContext>();
+  makeEffectORPC(AppLive).$context<RequestContext>();
 
 const directRouter = {
   orders: directProcedureBuilder
@@ -53,7 +53,7 @@ const directRouter = {
     }),
 };
 
-const contractImplementer = implementEffect(contract, runtime)
+const contractImplementer = implementEffect(contract, AppLive)
   .$context<RequestContext>()
   .use(({ context, next }) =>
     next({
@@ -342,23 +342,31 @@ const contractRouter = contractImplementer.router({
   },
 });
 
-export const router = {
+const router = {
   direct: directRouter,
   contract: contractRouter,
+};
+
+const logORPCError = (error: unknown) => {
+  const logEffect = Effect.logError(
+    "oRPC Error",
+    error instanceof ORPCError ? [error, error.cause] : error,
+  );
+
+  return runtime.runPromise(
+    process.env.VITEST === "true"
+      ? logEffect.pipe(
+          Effect.provideService(References.MinimumLogLevel, "None"),
+        )
+      : logEffect,
+  );
 };
 
 export const rpcHandler = new RPCHandler(router, {
   plugins: [new CORSPlugin()],
   interceptors: [
     onError(async (error) => {
-      await runtime.runPromise(
-        pipe(
-          Effect.logError(
-            "oRPC Error",
-            error instanceof ORPCError ? [error, error.cause] : error,
-          ),
-        ),
-      );
+      await logORPCError(error);
     }),
   ],
 });
@@ -373,14 +381,7 @@ export const openAPIHandler = new OpenAPIHandler(router, {
   ],
   interceptors: [
     onError(async (error) => {
-      await runtime.runPromise(
-        pipe(
-          Effect.logError(
-            "oRPC Error",
-            error instanceof ORPCError ? [error, error.cause] : error,
-          ),
-        ),
-      );
+      await logORPCError(error);
     }),
   ],
 });

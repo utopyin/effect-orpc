@@ -65,6 +65,30 @@ describe("implementEffect", () => {
     });
   });
 
+  it("can implement a contract directly from a Layer", async () => {
+    const CounterLive = Layer.succeed(Counter, {
+      increment: (n: number) => Effect.succeed(n + 1),
+    });
+    const oe = implementEffect(contract, CounterLive);
+    const procedure = oe.users.list.effect(function* ({ input }) {
+      const counter = yield* Counter;
+
+      return {
+        next: yield* counter.increment(input.amount),
+        requestId: "layer",
+      };
+    });
+
+    try {
+      await expect(call(procedure, { amount: 2 })).resolves.toEqual({
+        next: 3,
+        requestId: "layer",
+      });
+    } finally {
+      await procedure["~effect"].runtime.dispose();
+    }
+  });
+
   it("preserves contract enforcement at the root router", async () => {
     const oe = implementEffect(contract, runtime);
 

@@ -20,13 +20,17 @@ import type {
   Router,
 } from "@orpc/server";
 import type { IntersectPick } from "@orpc/shared";
+import type { Context as EffectContext, Layer } from "effect";
 
 import type {
   EffectBuilderDef,
   EffectErrorMapToErrorMap,
+  EffectOrORPCMiddleware,
+  EffectOptionalProvider,
   EffectProcedureBuilderWithInput,
   EffectProcedureBuilderWithOutput,
   EffectProcedureHandler,
+  EffectProvider,
   EffectRouterBuilder,
   EnhancedEffectRouter,
 } from ".";
@@ -36,6 +40,9 @@ import type {
   EffectErrorMap,
   MergedEffectErrorMap,
 } from "../tagged-error";
+
+type EffectTagIdentifier<T extends EffectContext.Key<any, any>> =
+  T extends EffectContext.Key<infer I, any> ? I : never;
 
 export interface EffectBuilderSurface<
   TInitialContext extends Context,
@@ -163,6 +170,28 @@ export interface EffectBuilderSurface<
     TInput,
     TOutput = any,
   >(
+    middleware: EffectOrORPCMiddleware<
+      TInitialContext,
+      UOutContext,
+      TInput,
+      TOutput,
+      TEffectErrorMap,
+      TRequirementsProvided,
+      TMeta
+    >,
+  ): DecoratedMiddleware<
+    TInitialContext,
+    UOutContext,
+    TInput,
+    TOutput,
+    any,
+    TMeta
+  >;
+  middleware<
+    UOutContext extends IntersectPick<TCurrentContext, UOutContext>,
+    TInput,
+    TOutput = any,
+  >(
     middleware: Middleware<
       TInitialContext,
       UOutContext,
@@ -213,6 +242,32 @@ export interface EffectBuilderSurface<
     TRuntimeError
   >;
   /**
+   * Uses an Effect middleware or native oRPC middleware to modify the context, throw early, or modify the response.
+   */
+  use<
+    UOutContext extends IntersectPick<TCurrentContext, UOutContext>,
+    UInContext extends Context = TCurrentContext,
+  >(
+    middleware: EffectOrORPCMiddleware<
+      UInContext | TCurrentContext,
+      UOutContext,
+      InferSchemaOutput<TInputSchema>,
+      unknown,
+      TEffectErrorMap,
+      TRequirementsProvided,
+      TMeta
+    >,
+  ): EffectBuilderSurface<
+    MergedInitialContext<TInitialContext, UInContext, TCurrentContext>,
+    MergedCurrentContext<TCurrentContext, UOutContext>,
+    TInputSchema,
+    TOutputSchema,
+    TEffectErrorMap,
+    TMeta,
+    TRequirementsProvided,
+    TRuntimeError
+  >;
+  /**
    * Uses a middleware to modify the context or improve the pipeline.
    *
    * @info Supports both normal middleware and inline middleware implementations.
@@ -234,6 +289,67 @@ export interface EffectBuilderSurface<
   ): EffectBuilderSurface<
     MergedInitialContext<TInitialContext, UInContext, TCurrentContext>,
     MergedCurrentContext<TCurrentContext, UOutContext>,
+    TInputSchema,
+    TOutputSchema,
+    TEffectErrorMap,
+    TMeta,
+    TRequirementsProvided,
+    TRuntimeError
+  >;
+  /**
+   * Provides an Effect layer to downstream procedures.
+   */
+  provide<TLayerOut, TLayerError, TLayerIn extends TRequirementsProvided>(
+    layer: Layer.Layer<TLayerOut, TLayerError, TLayerIn>,
+  ): EffectBuilderSurface<
+    TInitialContext,
+    TCurrentContext,
+    TInputSchema,
+    TOutputSchema,
+    TEffectErrorMap,
+    TMeta,
+    TRequirementsProvided | TLayerOut,
+    TRuntimeError | TLayerError
+  >;
+  /**
+   * Provides a request-scoped Effect service to downstream procedures.
+   */
+  provide<TTag extends EffectContext.Key<any, any>>(
+    tag: TTag,
+    provider: EffectProvider<
+      TCurrentContext,
+      InferSchemaOutput<TInputSchema>,
+      TEffectErrorMap,
+      TRequirementsProvided,
+      TMeta,
+      TTag
+    >,
+  ): EffectBuilderSurface<
+    TInitialContext,
+    TCurrentContext,
+    TInputSchema,
+    TOutputSchema,
+    TEffectErrorMap,
+    TMeta,
+    TRequirementsProvided | EffectTagIdentifier<TTag>,
+    TRuntimeError
+  >;
+  /**
+   * Optionally provides a request-scoped Effect service to downstream procedures.
+   */
+  provideOptional<TTag extends EffectContext.Key<any, any>>(
+    tag: TTag,
+    provider: EffectOptionalProvider<
+      TCurrentContext,
+      InferSchemaOutput<TInputSchema>,
+      TEffectErrorMap,
+      TRequirementsProvided,
+      TMeta,
+      TTag
+    >,
+  ): EffectBuilderSurface<
+    TInitialContext,
+    TCurrentContext,
     TInputSchema,
     TOutputSchema,
     TEffectErrorMap,

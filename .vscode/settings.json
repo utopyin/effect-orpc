@@ -9,5 +9,10 @@
     "source.fixAll.oxc": "explicit",
     "source.organizeImports": "explicit"
   },
-  "oxc.enable": true
+  "oxc.enable": true,
+  "typescript.preferences.autoImportFileExcludePatterns": ["repos/**"],
+  "javascript.preferences.autoImportFileExcludePatterns": ["repos/**"],
+  "files.exclude": { "repos/**": true },
+  "files.watcherExclude": { "repos/**": true },
+  "search.exclude": { "repos/**": true }
 }

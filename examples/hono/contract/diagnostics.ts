@@ -2,7 +2,7 @@ import * as z from "zod";
 
 import { baseContractProcedure, type ContractMeta, roleSchema } from "./shared";
 
-export const pingOutputSchema = z.object({
+const pingOutputSchema = z.object({
   ok: z.literal(true),
   requestId: z.string(),
   role: roleSchema,
@@ -11,7 +11,7 @@ export const pingOutputSchema = z.object({
   aborted: z.boolean(),
 });
 
-export const requestContextOutputSchema = z.object({
+const requestContextOutputSchema = z.object({
   requestId: z.string(),
   role: roleSchema,
   hasExplicitRole: z.boolean(),

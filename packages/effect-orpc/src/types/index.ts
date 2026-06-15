@@ -18,9 +18,19 @@ import type {
   ProcedureBuilderWithOutput,
   ProcedureDef,
   ProcedureHandlerOptions,
+  MiddlewareNextFnOptions,
+  MiddlewareOptions,
+  MiddlewareResult,
   RouterBuilder,
 } from "@orpc/server";
-import type { Effect, ManagedRuntime } from "effect";
+import type { MaybeOptionalOptions } from "@orpc/shared";
+import type {
+  Context as EffectContext,
+  Effect,
+  Layer,
+  ManagedRuntime,
+  Option,
+} from "effect";
 
 import type {
   EffectErrorConstructorMap,
@@ -67,6 +77,8 @@ export interface EffectBuilderDef<
    * Effect-extended error map that supports both traditional errors and tagged errors.
    */
   effectErrorMap: TEffectErrorMap;
+  effectSteps?: readonly EffectPipelineStep[];
+  effectHandler?: EffectProcedureHandlerConfig;
 }
 
 /**
@@ -91,6 +103,8 @@ export interface EffectProcedureDef<
 > {
   runtime: ManagedRuntime.ManagedRuntime<TRequirementsProvided, TRuntimeError>;
   effectErrorMap: TEffectErrorMap;
+  effectSteps?: readonly EffectPipelineStep[];
+  effectHandler?: EffectProcedureHandlerConfig;
 }
 
 /**
@@ -130,6 +144,270 @@ export type EffectProcedureHandler<
   EffectErrorMapToUnion<TEffectErrorMap> | ORPCError<ORPCErrorCode, unknown>,
   TRequirementsProvided
 >;
+
+export interface EffectProcedureHandlerConfig {
+  readonly effectFn: EffectProcedureHandler<any, any, any, any, any, any>;
+  readonly defaultCaptureStackTrace: () => string | undefined;
+  readonly spanConfig?: EffectSpanConfig;
+}
+
+type EffectTagService<T extends EffectContext.Key<any, any>> =
+  T extends EffectContext.Key<any, infer S> ? S : never;
+
+export type EffectProvider<
+  TCurrentContext extends Context,
+  TInput,
+  TEffectErrorMap extends EffectErrorMap,
+  TRequirementsProvided,
+  TMeta extends Meta,
+  TTag extends EffectContext.Key<any, any>,
+> = (
+  opt: ProcedureHandlerOptions<
+    TCurrentContext,
+    TInput,
+    EffectErrorConstructorMap<TEffectErrorMap>,
+    TMeta
+  >,
+) => Effect.Effect<
+  EffectTagService<TTag>,
+  EffectErrorMapToUnion<TEffectErrorMap> | ORPCError<ORPCErrorCode, unknown>,
+  TRequirementsProvided
+>;
+
+export type EffectOptionalProvider<
+  TCurrentContext extends Context,
+  TInput,
+  TEffectErrorMap extends EffectErrorMap,
+  TRequirementsProvided,
+  TMeta extends Meta,
+  TTag extends EffectContext.Key<any, any>,
+> = (
+  opt: ProcedureHandlerOptions<
+    TCurrentContext,
+    TInput,
+    EffectErrorConstructorMap<TEffectErrorMap>,
+    TMeta
+  >,
+) => Effect.Effect<
+  Option.Option<EffectTagService<TTag>>,
+  EffectErrorMapToUnion<TEffectErrorMap> | ORPCError<ORPCErrorCode, unknown>,
+  TRequirementsProvided
+>;
+
+interface EffectMiddlewareNext<
+  TOutput,
+  TEffectErrorMap extends EffectErrorMap,
+  TRequirementsProvided,
+> {
+  <UOutContext extends Context = Record<never, never>>(
+    ...rest: MaybeOptionalOptions<MiddlewareNextFnOptions<UOutContext>>
+  ): Effect.Effect<
+    EffectMiddlewareResult<UOutContext, TOutput>,
+    EffectErrorMapToUnion<TEffectErrorMap> | ORPCError<ORPCErrorCode, unknown>,
+    TRequirementsProvided
+  >;
+}
+
+export type EffectMiddlewareResult<TOutContext extends Context, TOutput> = {
+  readonly output: TOutput;
+  readonly context: TOutContext;
+};
+
+export interface EffectMiddlewareOutput<
+  TOutput,
+  TEffectErrorMap extends EffectErrorMap,
+  TRequirementsProvided,
+> {
+  (
+    output: TOutput,
+  ): Effect.Effect<
+    EffectMiddlewareResult<Record<never, never>, TOutput>,
+    EffectErrorMapToUnion<TEffectErrorMap> | ORPCError<ORPCErrorCode, unknown>,
+    TRequirementsProvided
+  >;
+}
+
+/**
+ * Contextual typing bridge for `.use(...)` overloads.
+ *
+ * At runtime `next()` is either Effect-native or oRPC-native depending on
+ * whether the middleware is a generator function. At type-check time we need
+ * inline middleware to support both `return next()` and `yield* next()` without
+ * an explicit annotation. The return type is intentionally an intersection:
+ * assignable to `PromiseLike<A>` for native middleware, and yieldable as an
+ * `Effect<A, E, R>` for Effect middleware.
+ */
+type EffectAndPromiseLike<A, E, R> = Effect.Effect<A, E, R> & PromiseLike<A>;
+
+/** A `next` function that can be consumed by native oRPC or Effect middleware. */
+interface EffectOrORPCMiddlewareNext<
+  TOutput,
+  TEffectErrorMap extends EffectErrorMap,
+  TRequirementsProvided,
+> {
+  <UOutContext extends Context = Record<never, never>>(
+    ...rest: MaybeOptionalOptions<MiddlewareNextFnOptions<UOutContext>>
+  ): EffectAndPromiseLike<
+    EffectMiddlewareResult<UOutContext, TOutput>,
+    EffectErrorMapToUnion<TEffectErrorMap> | ORPCError<ORPCErrorCode, unknown>,
+    TRequirementsProvided
+  >;
+}
+
+/** An `output` helper that can be consumed by native oRPC or Effect middleware. */
+interface EffectOrORPCMiddlewareOutput<
+  TOutput,
+  TEffectErrorMap extends EffectErrorMap,
+  TRequirementsProvided,
+> {
+  (
+    output: TOutput,
+  ): EffectAndPromiseLike<
+    EffectMiddlewareResult<Record<never, never>, TOutput>,
+    EffectErrorMapToUnion<TEffectErrorMap> | ORPCError<ORPCErrorCode, unknown>,
+    TRequirementsProvided
+  >;
+}
+
+/** Middleware options with the dual-shape `next` used for `.use(...)` inference. */
+type EffectOrORPCMiddlewareOptions<
+  TCurrentContext extends Context,
+  TOutput,
+  TEffectErrorMap extends EffectErrorMap,
+  TRequirementsProvided,
+  TMeta extends Meta,
+> = Omit<
+  MiddlewareOptions<
+    TCurrentContext,
+    TOutput,
+    EffectErrorConstructorMap<TEffectErrorMap>,
+    TMeta
+  >,
+  "next"
+> & {
+  readonly next: EffectOrORPCMiddlewareNext<
+    TOutput,
+    TEffectErrorMap,
+    TRequirementsProvided
+  >;
+};
+
+/**
+ * Public `.use(...)` middleware shape.
+ *
+ * Accepts native oRPC middleware returns (`result` / `PromiseLike<result>`) and
+ * Effect generator middleware returns. Runtime dispatch still uses
+ * `isEffectMiddleware(...)`; this type only makes the inline callback ergonomic.
+ */
+export type EffectOrORPCMiddleware<
+  TCurrentContext extends Context,
+  TOutContext extends Context,
+  TInput,
+  TOutput,
+  TEffectErrorMap extends EffectErrorMap,
+  TRequirementsProvided,
+  TMeta extends Meta,
+> = (
+  opt: EffectOrORPCMiddlewareOptions<
+    TCurrentContext,
+    TOutput,
+    TEffectErrorMap,
+    TRequirementsProvided,
+    TMeta
+  >,
+  input: TInput,
+  output: EffectOrORPCMiddlewareOutput<
+    TOutput,
+    TEffectErrorMap,
+    TRequirementsProvided
+  >,
+) =>
+  | MiddlewareResult<TOutContext, TOutput>
+  | PromiseLike<MiddlewareResult<TOutContext, TOutput>>
+  | Effect.fn.Return<
+      EffectMiddlewareResult<TOutContext, TOutput> | void,
+      | EffectErrorMapToUnion<TEffectErrorMap>
+      | ORPCError<ORPCErrorCode, unknown>,
+      TRequirementsProvided
+    >;
+
+export type EffectMiddlewareOptions<
+  TCurrentContext extends Context,
+  TOutput,
+  TEffectErrorMap extends EffectErrorMap,
+  TRequirementsProvided,
+  TMeta extends Meta,
+> = Omit<
+  MiddlewareOptions<
+    TCurrentContext,
+    TOutput,
+    EffectErrorConstructorMap<TEffectErrorMap>,
+    TMeta
+  >,
+  "next"
+> & {
+  readonly next: EffectMiddlewareNext<
+    TOutput,
+    TEffectErrorMap,
+    TRequirementsProvided
+  >;
+};
+
+export type EffectMiddleware<
+  TCurrentContext extends Context,
+  TOutContext extends Context,
+  TInput,
+  TOutput,
+  TEffectErrorMap extends EffectErrorMap,
+  TRequirementsProvided,
+  TMeta extends Meta,
+> = (
+  opt: EffectMiddlewareOptions<
+    TCurrentContext,
+    TOutput,
+    TEffectErrorMap,
+    TRequirementsProvided,
+    TMeta
+  >,
+  input: TInput,
+  output: EffectMiddlewareOutput<
+    TOutput,
+    TEffectErrorMap,
+    TRequirementsProvided
+  >,
+) => Effect.fn.Return<
+  EffectMiddlewareResult<TOutContext, TOutput> | void,
+  EffectErrorMapToUnion<TEffectErrorMap> | ORPCError<ORPCErrorCode, unknown>,
+  TRequirementsProvided
+>;
+
+type EffectProvideStep = {
+  readonly _tag: "provide";
+  readonly tag: EffectContext.Key<any, any>;
+  readonly provider: EffectProvider<any, any, any, any, any, any>;
+};
+
+type EffectProvideOptionalStep = {
+  readonly _tag: "provideOptional";
+  readonly tag: EffectContext.Key<any, any>;
+  readonly provider: EffectOptionalProvider<any, any, any, any, any, any>;
+};
+
+type EffectProvideLayerStep = {
+  readonly _tag: "provideLayer";
+  readonly layer: Layer.Layer<any, any, any>;
+};
+
+type EffectMiddlewareStep = {
+  readonly _tag: "middleware";
+  readonly middleware: EffectMiddleware<any, any, any, any, any, any, any>;
+};
+
+export type EffectPipelineStep =
+  | EffectProvideStep
+  | EffectProvideOptionalStep
+  | EffectProvideLayerStep
+  | EffectMiddlewareStep;
 
 export type EffectErrorMapToErrorMap<T extends EffectErrorMap> = {
   [K in keyof T as T[K] extends ErrorMapItem<AnySchema>

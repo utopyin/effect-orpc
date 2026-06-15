@@ -4,5 +4,6 @@
   "rules": {
     "require-yield": "off",
     "no-unused-vars": "error"
-  }
+  },
+  "ignorePatterns": ["repos/**"]
 }

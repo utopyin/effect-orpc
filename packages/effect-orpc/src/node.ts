@@ -12,6 +12,7 @@ const servicesStorage = new AsyncLocalStorage<Context.Context<any>>();
 
 const bridge: ServiceContextBridge = {
   getCurrentServices: () => servicesStorage.getStore(),
+  runWithServices: (services, fn) => servicesStorage.run(services, fn),
 };
 
 installServiceContextBridge(bridge);

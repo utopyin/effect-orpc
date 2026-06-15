@@ -1,4 +1,4 @@
-import { Effect } from "effect";
+import { Effect, References } from "effect";
 import { withFiberContext } from "effect-orpc/node";
 import type { Context, MiddlewareHandler } from "hono";
 
@@ -18,7 +18,13 @@ export const requestLoggingMiddleware: MiddlewareHandler = async (c, next) => {
     yield* Effect.logInfo(`[Response] ${method} ${path} (${c.res.status})`);
   }).pipe(Effect.scoped, Effect.withSpan(`${method} ${path}`));
 
-  await Effect.runPromise(requestEffect);
+  await Effect.runPromise(
+    process.env.VITEST === "true"
+      ? requestEffect.pipe(
+          Effect.provideService(References.MinimumLogLevel, "None"),
+        )
+      : requestEffect,
+  );
 };
 
 export const getRequestContext = (c: Context): RequestContext => {

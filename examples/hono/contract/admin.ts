@@ -7,7 +7,7 @@ import {
   roleSchema,
 } from "./shared";
 
-export const cacheReportOutputSchema = z.object({
+const cacheReportOutputSchema = z.object({
   requestId: z.string(),
   role: roleSchema,
   inspectedVia: z.string(),
@@ -15,11 +15,11 @@ export const cacheReportOutputSchema = z.object({
   storageRows: z.number(),
 });
 
-export const auditReplayInputSchema = z.object({
+const auditReplayInputSchema = z.object({
   orderIds: z.array(z.string().min(1)).min(1).max(3),
 });
 
-export const auditReplayOutputSchema = z.object({
+const auditReplayOutputSchema = z.object({
   requestId: z.string(),
   accepted: z.literal(true),
   replayed: z.array(z.string()),

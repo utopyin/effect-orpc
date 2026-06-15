@@ -1,5 +1,5 @@
 import type { Meta, Schema } from "@orpc/contract";
-import { ContractProcedure, eventIterator } from "@orpc/contract";
+import { ContractProcedure } from "@orpc/contract";
 import * as z from "zod";
 
 export const inputSchema = z.object({
@@ -51,30 +51,6 @@ export const pong = new ContractProcedure<
   errorMap: {},
   meta: {},
   route: {},
-});
-
-export const router = {
-  ping,
-  pong,
-  nested: {
-    ping,
-    pong,
-  },
-};
-
-export const streamedOutputSchema = eventIterator(outputSchema);
-
-export const streamed = new ContractProcedure<
-  typeof inputSchema,
-  typeof streamedOutputSchema,
-  typeof baseErrorMap,
-  Meta
->({
-  errorMap: baseErrorMap,
-  meta: {},
-  route: {},
-  inputSchema,
-  outputSchema: streamedOutputSchema,
 });
 
 export type AssertExtends<_TActual extends TExpected, TExpected> = true;

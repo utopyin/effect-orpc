@@ -14,6 +14,7 @@ import type {
   BuilderDef,
   Context,
   EnhanceRouterOptions,
+  IntersectPick,
   Lazy,
   Lazyable,
   MapInputMiddleware,
@@ -23,12 +24,15 @@ import type {
   ProcedureHandler,
   Router,
 } from "@orpc/server";
-import type { IntersectPick } from "@orpc/shared";
+import type { Context as EffectContext, Layer } from "effect";
 
 import type {
   EffectBuilderDef,
   EffectErrorMapToErrorMap,
+  EffectOptionalProvider,
+  EffectOrORPCMiddleware,
   EffectProcedureHandler,
+  EffectProvider,
 } from ".";
 import type {
   EffectDecoratedProcedure,
@@ -39,6 +43,9 @@ import type {
   EffectErrorMap,
   MergedEffectErrorMap,
 } from "../tagged-error";
+
+type EffectTagIdentifier<T extends EffectContext.Key<any, any>> =
+  T extends EffectContext.Key<infer I, any> ? I : never;
 
 export interface EffectBuilderWithMiddlewares<
   TInitialContext extends Context,
@@ -101,17 +108,82 @@ export interface EffectBuilderWithMiddlewares<
     UOutContext extends IntersectPick<TCurrentContext, UOutContext>,
     UInContext extends Context = TCurrentContext,
   >(
-    middleware: Middleware<
+    middleware: EffectOrORPCMiddleware<
       UInContext | TCurrentContext,
       UOutContext,
       unknown,
       unknown,
-      EffectErrorConstructorMap<TEffectErrorMap>,
+      TEffectErrorMap,
+      TRequirementsProvided,
       TMeta
     >,
   ): EffectBuilderWithMiddlewares<
     MergedInitialContext<TInitialContext, UInContext, TCurrentContext>,
     MergedCurrentContext<TCurrentContext, UOutContext>,
+    TInputSchema,
+    TOutputSchema,
+    TEffectErrorMap,
+    TMeta,
+    TRequirementsProvided,
+    TRuntimeError
+  >;
+
+  /**
+   * Provides an Effect layer to downstream procedures.
+   */
+  "provide"<TLayerOut, TLayerError, TLayerIn extends TRequirementsProvided>(
+    layer: Layer.Layer<TLayerOut, TLayerError, TLayerIn>,
+  ): EffectBuilderWithMiddlewares<
+    TInitialContext,
+    TCurrentContext,
+    TInputSchema,
+    TOutputSchema,
+    TEffectErrorMap,
+    TMeta,
+    TRequirementsProvided | TLayerOut,
+    TRuntimeError | TLayerError
+  >;
+
+  /**
+   * Provides a request-scoped Effect service to downstream procedures.
+   */
+  "provide"<TTag extends EffectContext.Key<any, any>>(
+    tag: TTag,
+    provider: EffectProvider<
+      TCurrentContext,
+      InferSchemaOutput<TInputSchema>,
+      TEffectErrorMap,
+      TRequirementsProvided,
+      TMeta,
+      TTag
+    >,
+  ): EffectBuilderWithMiddlewares<
+    TInitialContext,
+    TCurrentContext,
+    TInputSchema,
+    TOutputSchema,
+    TEffectErrorMap,
+    TMeta,
+    TRequirementsProvided | EffectTagIdentifier<TTag>,
+    TRuntimeError
+  >;
+
+  /**
+   * Optionally provides a request-scoped Effect service to downstream procedures.
+   */
+  "provideOptional"<TTag extends EffectContext.Key<any, any>>(
+    tag: TTag,
+    provider: EffectOptionalProvider<
+      TCurrentContext,
+      InferSchemaOutput<TInputSchema>,
+      TEffectErrorMap,
+      TRequirementsProvided,
+      TMeta,
+      TTag
+    >,
+  ): EffectBuilderWithMiddlewares<
+    TInitialContext,
+    TCurrentContext,
     TInputSchema,
     TOutputSchema,
     TEffectErrorMap,
@@ -390,17 +462,82 @@ export interface EffectProcedureBuilder<
     UOutContext extends IntersectPick<TCurrentContext, UOutContext>,
     UInContext extends Context = TCurrentContext,
   >(
-    middleware: Middleware<
+    middleware: EffectOrORPCMiddleware<
       UInContext | TCurrentContext,
       UOutContext,
       unknown,
       unknown,
-      EffectErrorConstructorMap<TEffectErrorMap>,
+      TEffectErrorMap,
+      TRequirementsProvided,
       TMeta
     >,
   ): EffectProcedureBuilder<
     MergedInitialContext<TInitialContext, UInContext, TCurrentContext>,
     MergedCurrentContext<TCurrentContext, UOutContext>,
+    TInputSchema,
+    TOutputSchema,
+    TEffectErrorMap,
+    TMeta,
+    TRequirementsProvided,
+    TRuntimeError
+  >;
+
+  /**
+   * Provides an Effect layer to downstream procedures.
+   */
+  "provide"<TLayerOut, TLayerError, TLayerIn extends TRequirementsProvided>(
+    layer: Layer.Layer<TLayerOut, TLayerError, TLayerIn>,
+  ): EffectProcedureBuilder<
+    TInitialContext,
+    TCurrentContext,
+    TInputSchema,
+    TOutputSchema,
+    TEffectErrorMap,
+    TMeta,
+    TRequirementsProvided | TLayerOut,
+    TRuntimeError | TLayerError
+  >;
+
+  /**
+   * Provides a request-scoped Effect service to downstream procedures.
+   */
+  "provide"<TTag extends EffectContext.Key<any, any>>(
+    tag: TTag,
+    provider: EffectProvider<
+      TCurrentContext,
+      InferSchemaOutput<TInputSchema>,
+      TEffectErrorMap,
+      TRequirementsProvided,
+      TMeta,
+      TTag
+    >,
+  ): EffectProcedureBuilder<
+    TInitialContext,
+    TCurrentContext,
+    TInputSchema,
+    TOutputSchema,
+    TEffectErrorMap,
+    TMeta,
+    TRequirementsProvided | EffectTagIdentifier<TTag>,
+    TRuntimeError
+  >;
+
+  /**
+   * Optionally provides a request-scoped Effect service to downstream procedures.
+   */
+  "provideOptional"<TTag extends EffectContext.Key<any, any>>(
+    tag: TTag,
+    provider: EffectOptionalProvider<
+      TCurrentContext,
+      InferSchemaOutput<TInputSchema>,
+      TEffectErrorMap,
+      TRequirementsProvided,
+      TMeta,
+      TTag
+    >,
+  ): EffectProcedureBuilder<
+    TInitialContext,
+    TCurrentContext,
     TInputSchema,
     TOutputSchema,
     TEffectErrorMap,
@@ -620,12 +757,13 @@ export interface EffectProcedureBuilderWithInput<
     UOutContext extends IntersectPick<TCurrentContext, UOutContext>,
     UInContext extends Context = TCurrentContext,
   >(
-    middleware: Middleware<
+    middleware: EffectOrORPCMiddleware<
       UInContext | TCurrentContext,
       UOutContext,
+      InferSchemaOutput<TInputSchema>,
       unknown,
-      unknown,
-      EffectErrorConstructorMap<TEffectErrorMap>,
+      TEffectErrorMap,
+      TRequirementsProvided,
       TMeta
     >,
   ): EffectProcedureBuilderWithInput<
@@ -664,6 +802,70 @@ export interface EffectProcedureBuilderWithInput<
   ): EffectProcedureBuilderWithInput<
     MergedInitialContext<TInitialContext, UInContext, TCurrentContext>,
     MergedCurrentContext<TCurrentContext, UOutContext>,
+    TInputSchema,
+    TOutputSchema,
+    TEffectErrorMap,
+    TMeta,
+    TRequirementsProvided,
+    TRuntimeError
+  >;
+
+  /**
+   * Provides an Effect layer to downstream procedures.
+   */
+  "provide"<TLayerOut, TLayerError, TLayerIn extends TRequirementsProvided>(
+    layer: Layer.Layer<TLayerOut, TLayerError, TLayerIn>,
+  ): EffectProcedureBuilderWithInput<
+    TInitialContext,
+    TCurrentContext,
+    TInputSchema,
+    TOutputSchema,
+    TEffectErrorMap,
+    TMeta,
+    TRequirementsProvided | TLayerOut,
+    TRuntimeError | TLayerError
+  >;
+
+  /**
+   * Provides a request-scoped Effect service to downstream procedures.
+   */
+  "provide"<TTag extends EffectContext.Key<any, any>>(
+    tag: TTag,
+    provider: EffectProvider<
+      TCurrentContext,
+      InferSchemaOutput<TInputSchema>,
+      TEffectErrorMap,
+      TRequirementsProvided,
+      TMeta,
+      TTag
+    >,
+  ): EffectProcedureBuilderWithInput<
+    TInitialContext,
+    TCurrentContext,
+    TInputSchema,
+    TOutputSchema,
+    TEffectErrorMap,
+    TMeta,
+    TRequirementsProvided | EffectTagIdentifier<TTag>,
+    TRuntimeError
+  >;
+
+  /**
+   * Optionally provides a request-scoped Effect service to downstream procedures.
+   */
+  "provideOptional"<TTag extends EffectContext.Key<any, any>>(
+    tag: TTag,
+    provider: EffectOptionalProvider<
+      TCurrentContext,
+      InferSchemaOutput<TInputSchema>,
+      TEffectErrorMap,
+      TRequirementsProvided,
+      TMeta,
+      TTag
+    >,
+  ): EffectProcedureBuilderWithInput<
+    TInitialContext,
+    TCurrentContext,
     TInputSchema,
     TOutputSchema,
     TEffectErrorMap,
@@ -864,17 +1066,82 @@ export interface EffectProcedureBuilderWithOutput<
     UOutContext extends IntersectPick<TCurrentContext, UOutContext>,
     UInContext extends Context = TCurrentContext,
   >(
-    middleware: Middleware<
+    middleware: EffectOrORPCMiddleware<
       UInContext | TCurrentContext,
       UOutContext,
       unknown,
       InferSchemaInput<TOutputSchema>,
-      EffectErrorConstructorMap<TEffectErrorMap>,
+      TEffectErrorMap,
+      TRequirementsProvided,
       TMeta
     >,
   ): EffectProcedureBuilderWithOutput<
     MergedInitialContext<TInitialContext, UInContext, TCurrentContext>,
     MergedCurrentContext<TCurrentContext, UOutContext>,
+    TInputSchema,
+    TOutputSchema,
+    TEffectErrorMap,
+    TMeta,
+    TRequirementsProvided,
+    TRuntimeError
+  >;
+
+  /**
+   * Provides an Effect layer to downstream procedures.
+   */
+  "provide"<TLayerOut, TLayerError, TLayerIn extends TRequirementsProvided>(
+    layer: Layer.Layer<TLayerOut, TLayerError, TLayerIn>,
+  ): EffectProcedureBuilderWithOutput<
+    TInitialContext,
+    TCurrentContext,
+    TInputSchema,
+    TOutputSchema,
+    TEffectErrorMap,
+    TMeta,
+    TRequirementsProvided | TLayerOut,
+    TRuntimeError | TLayerError
+  >;
+
+  /**
+   * Provides a request-scoped Effect service to downstream procedures.
+   */
+  "provide"<TTag extends EffectContext.Key<any, any>>(
+    tag: TTag,
+    provider: EffectProvider<
+      TCurrentContext,
+      InferSchemaOutput<TInputSchema>,
+      TEffectErrorMap,
+      TRequirementsProvided,
+      TMeta,
+      TTag
+    >,
+  ): EffectProcedureBuilderWithOutput<
+    TInitialContext,
+    TCurrentContext,
+    TInputSchema,
+    TOutputSchema,
+    TEffectErrorMap,
+    TMeta,
+    TRequirementsProvided | EffectTagIdentifier<TTag>,
+    TRuntimeError
+  >;
+
+  /**
+   * Optionally provides a request-scoped Effect service to downstream procedures.
+   */
+  "provideOptional"<TTag extends EffectContext.Key<any, any>>(
+    tag: TTag,
+    provider: EffectOptionalProvider<
+      TCurrentContext,
+      InferSchemaOutput<TInputSchema>,
+      TEffectErrorMap,
+      TRequirementsProvided,
+      TMeta,
+      TTag
+    >,
+  ): EffectProcedureBuilderWithOutput<
+    TInitialContext,
+    TCurrentContext,
     TInputSchema,
     TOutputSchema,
     TEffectErrorMap,
@@ -1076,12 +1343,13 @@ export interface EffectProcedureBuilderWithInputOutput<
     UOutContext extends IntersectPick<TCurrentContext, UOutContext>,
     UInContext extends Context = TCurrentContext,
   >(
-    middleware: Middleware<
+    middleware: EffectOrORPCMiddleware<
       UInContext | TCurrentContext,
       UOutContext,
       InferSchemaOutput<TInputSchema>,
       InferSchemaInput<TOutputSchema>,
-      EffectErrorConstructorMap<TEffectErrorMap>,
+      TEffectErrorMap,
+      TRequirementsProvided,
       TMeta
     >,
   ): EffectProcedureBuilderWithInputOutput<
@@ -1120,6 +1388,70 @@ export interface EffectProcedureBuilderWithInputOutput<
   ): EffectProcedureBuilderWithInputOutput<
     MergedInitialContext<TInitialContext, UInContext, TCurrentContext>,
     MergedCurrentContext<TCurrentContext, UOutContext>,
+    TInputSchema,
+    TOutputSchema,
+    TEffectErrorMap,
+    TMeta,
+    TRequirementsProvided,
+    TRuntimeError
+  >;
+
+  /**
+   * Provides an Effect layer to downstream procedures.
+   */
+  "provide"<TLayerOut, TLayerError, TLayerIn extends TRequirementsProvided>(
+    layer: Layer.Layer<TLayerOut, TLayerError, TLayerIn>,
+  ): EffectProcedureBuilderWithInputOutput<
+    TInitialContext,
+    TCurrentContext,
+    TInputSchema,
+    TOutputSchema,
+    TEffectErrorMap,
+    TMeta,
+    TRequirementsProvided | TLayerOut,
+    TRuntimeError | TLayerError
+  >;
+
+  /**
+   * Provides a request-scoped Effect service to downstream procedures.
+   */
+  "provide"<TTag extends EffectContext.Key<any, any>>(
+    tag: TTag,
+    provider: EffectProvider<
+      TCurrentContext,
+      InferSchemaOutput<TInputSchema>,
+      TEffectErrorMap,
+      TRequirementsProvided,
+      TMeta,
+      TTag
+    >,
+  ): EffectProcedureBuilderWithInputOutput<
+    TInitialContext,
+    TCurrentContext,
+    TInputSchema,
+    TOutputSchema,
+    TEffectErrorMap,
+    TMeta,
+    TRequirementsProvided | EffectTagIdentifier<TTag>,
+    TRuntimeError
+  >;
+
+  /**
+   * Optionally provides a request-scoped Effect service to downstream procedures.
+   */
+  "provideOptional"<TTag extends EffectContext.Key<any, any>>(
+    tag: TTag,
+    provider: EffectOptionalProvider<
+      TCurrentContext,
+      InferSchemaOutput<TInputSchema>,
+      TEffectErrorMap,
+      TRequirementsProvided,
+      TMeta,
+      TTag
+    >,
+  ): EffectProcedureBuilderWithInputOutput<
+    TInitialContext,
+    TCurrentContext,
     TInputSchema,
     TOutputSchema,
     TEffectErrorMap,
@@ -1282,12 +1614,13 @@ export interface EffectRouterBuilder<
     UOutContext extends IntersectPick<TCurrentContext, UOutContext>,
     UInContext extends Context = TCurrentContext,
   >(
-    middleware: Middleware<
+    middleware: EffectOrORPCMiddleware<
       UInContext | TCurrentContext,
       UOutContext,
       unknown,
       unknown,
-      EffectErrorConstructorMap<TEffectErrorMap>,
+      TEffectErrorMap,
+      TRequirementsProvided,
       TMeta
     >,
   ): EffectRouterBuilder<

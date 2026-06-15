@@ -1,7 +1,11 @@
 import type { ManagedRuntime } from "effect";
 
 import type { EffectErrorMap } from "../tagged-error";
-import type { EffectSpanConfig } from "../types";
+import type {
+  EffectPipelineStep,
+  EffectProcedureHandlerConfig,
+  EffectSpanConfig,
+} from "../types";
 
 export interface EffectExtensionState<
   TRequirementsProvided = any,
@@ -22,6 +26,12 @@ export interface EffectExtensionState<
    * @see {@link EffectSpanConfig}
    */
   spanConfig?: EffectSpanConfig;
+  /**
+   * Pending Effect-native provider / middleware steps that have not been flushed
+   * into the oRPC middleware chain.
+   */
+  effectSteps?: readonly EffectPipelineStep[];
+  effectHandler?: EffectProcedureHandlerConfig;
 }
 
 export interface EffectInternals<TUpstream extends object = object> {
@@ -62,25 +72,13 @@ export function getEffectInternals<TUpstream extends object>(
   return target[effectInternalsSymbol];
 }
 
-export function getEffectUpstream<TUpstream extends object>(
+function getEffectUpstream<TUpstream extends object>(
   target: EffectProxyTarget<TUpstream>,
 ): TUpstream {
   return getEffectInternals(target).upstream;
 }
 
-export function getEffectState(
-  target: EffectProxyTarget,
-): EffectExtensionState {
-  return getEffectInternals(target).state;
-}
-
-export function getEffectMethodCache(
-  target: EffectProxyTarget,
-): Map<PropertyKey, unknown> {
-  return getEffectInternals(target).methodCache;
-}
-
-export function hasEffectState(value: unknown): value is EffectProxyTarget {
+function hasEffectState(value: unknown): value is EffectProxyTarget {
   return (
     typeof value === "object" &&
     value !== null &&

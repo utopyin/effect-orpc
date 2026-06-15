@@ -19,7 +19,7 @@ const LoggerLive =
     ? Logger.minimumLogLevel(LogLevel.None)
     : Logger.pretty;
 
-export const AppLive = Layer.mergeAll(LoggerLive, OrderService.Default).pipe(
+const AppLive = Layer.mergeAll(LoggerLive, OrderService.Default).pipe(
   Layer.provideMerge(NodeSdkLive),
 );
 

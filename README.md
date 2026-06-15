@@ -68,7 +68,7 @@ const effectProcedure = eos
   });
 
 // Use ManagedRuntime only when scoped resources should be acquired once and
-// released on shutdown, for example a database pool shared across requests:
+// released on shutdown, for example a shared cache, database pool, or telemetry SDK:
 // const runtime = ManagedRuntime.make(UsersRepo.Default);
 // const effectProcedure = makeEffectORPC(runtime).errors({ UserNotFoundError });
 
@@ -482,9 +482,9 @@ with `.provide(layer)`:
 const effectProcedure = eos.provide(AppLive);
 ```
 
-Use `makeEffectORPC(runtime)` only when a scoped `Layer` should be acquired once
-and released by your application shutdown path, such as a database pool or HTTP
-client that must stay open across requests:
+Use `makeEffectORPC(runtime)` when a scoped `Layer` should be acquired once and
+released by your application shutdown path, such as a shared cache, database
+pool, HTTP client, or telemetry SDK:
 
 ```ts
 const runtime = ManagedRuntime.make(AppLive);
@@ -507,7 +507,7 @@ const effectAuthedOs = makeEffectORPC(authedBuilder).provide(AppLive);
 Creates an Effect-aware contract implementer.
 
 - `contract` - An oRPC contract router built with `oc`
-- `layerOrRuntime` - A `Layer<R, E, never>` provided per call, or a user-owned `ManagedRuntime<R, E>` for scoped resources that should stay open across requests (for example, a database pool)
+- `layerOrRuntime` - A `Layer<R, E, never>` provided per call, or a user-owned `ManagedRuntime<R, E>` when the application should control acquisition and release (for example, a shared cache, database pool, or telemetry SDK)
 
 Returns a contract-shaped implementer tree whose leaves support `.effect(...)`.
 

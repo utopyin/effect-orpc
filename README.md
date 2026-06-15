@@ -268,8 +268,8 @@ MyCustomError: Something went wrong
 
 ## Effect middleware
 
-`.use(...)` accepts generator-based Effect middleware in addition to native oRPC
-middleware. Two patterns are supported:
+`.use(...)` accepts generator-based and Effect-returning middleware in addition
+to native oRPC middleware. Two patterns are supported:
 
 **Gate** — run auth or validation side effects, then let the pipeline continue
 automatically (no need to call `next`):
@@ -304,20 +304,39 @@ effectProcedure.use(function* ({ next }, _input, output) {
 });
 ```
 
-Calling `yield* next()` without returning its result still runs the handler once,
-but prefer `return yield* next(...)` so the pipeline receives your middleware
-result explicitly.
+Calling `yield* next()` without returning its result still runs the handler once, but prefer `return yield* next(...)` so the pipeline receives your middleware result explicitly.
+
+Effect-returning middleware is also supported, including `Effect.fn(...)` and
+`() => Effect.gen(...)`:
+
+```ts
+effectProcedure.use(
+  Effect.fn("middleware.auth")(function* ({ next }) {
+    const user = yield* CurrentUser;
+    return yield* next({ context: { userId: user.id } });
+  }),
+);
+```
+
+Request-scoped providers support the same generator or Effect-returning style:
+
+```ts
+effectProcedure.provide(CurrentUser, function* ({ context }) {
+  yield* Effect.logDebug("resolving current user");
+  return context.user;
+});
+```
 
 ### Runtime boundaries and fiber context continuity
 
-`effect-orpc` batches contiguous Effect-native steps into one runtime boundary.
-Effect-native steps are `.provide(...)`, `.provideOptional(...)`, generator
-`.use(function* ...)`, and `.effect(function* ...)`.
+`effect-orpc` batches contiguous Effect-native steps into one runtime boundary. Effect-native steps are `.provide(...)`, `.provideOptional(...)`, generator `.use(function* ...)`, and `.effect(function* ...)`. Effect-returning handlers, providers, and middleware are supported too; named `Effect.fn(...)` callbacks keep their own spans rather than being wrapped as generators.
 
 ```ts
 eos
   .provide(AppLive)
-  .provide(CurrentUser, ({ context }) => Effect.succeed(context.user))
+  .provide(CurrentUser, function* ({ context }) {
+    return context.user;
+  })
   .use(function* ({ next }) {
     const user = yield* CurrentUser;
     return yield* next({ context: { userId: user.id } });
@@ -328,11 +347,9 @@ eos
   });
 ```
 
-The example above runs the provider, middleware, and handler inside a single
-Effect execution boundary.
+The example above runs the provider, middleware, and handler inside a single Effect execution boundary.
 
-A native oRPC middleware breaks the contiguous Effect pipeline. Pending Effect
-steps are flushed into one generated oRPC middleware before the native middleware:
+A native oRPC middleware breaks the contiguous Effect pipeline. Pending Effect steps are flushed into one generated oRPC middleware before the native middleware:
 
 ```ts
 eos
@@ -350,21 +367,15 @@ eos
   });
 ```
 
-That split still creates multiple runtime boundaries. If the Node bridge is
-installed, however, `effect-orpc` carries the current `FiberRefs` through the
-native oRPC continuation and merges them into the next Effect boundary:
+That split still creates multiple runtime boundaries. If the Node bridge is installed, however, `effect-orpc` carries the current Effect service context through the native oRPC continuation and merges it into the next Effect boundary:
 
 ```ts
 import "effect-orpc/node";
 ```
 
-Use the side-effect import when you only need continuity across internal
-`effect-orpc` boundaries, such as Effect group #1 → native oRPC middleware →
-Effect group #2.
+Use the side-effect import when you only need continuity across internal `effect-orpc` boundaries, such as Effect group #1 → native oRPC middleware → Effect group #2.
 
-Procedure-level `.provide*` after a native `.handler(...)` has no Effect handler
-boundary to attach to, so it is installed as an oRPC middleware that runs its
-provider Effect through the configured runtime source:
+Procedure-level `.provide*` after a native `.handler(...)` has no Effect handler boundary to attach to, so it is installed as an oRPC middleware that runs its provider Effect through the configured runtime source:
 
 ```ts
 eos
@@ -373,21 +384,16 @@ eos
   .provide(CurrentUser, getCurrentUser); // fallback provider middleware
 ```
 
-If you want `.provide*` and Effect middleware to batch with the handler, use
-`.effect(function* ...)` instead of `.handler(...)`.
+If you want `.provide*` and Effect middleware to batch with the handler, use `.effect(function* ...)` instead of `.handler(...)`.
 
-## Request-Scoped Fiber Context
+## Request-Scoped Effect Context
 
-The `/node` entrypoint installs a bridge backed by `AsyncLocalStorage`. It has
-two uses:
+The `/node` entrypoint installs a bridge backed by `AsyncLocalStorage`. It has two uses:
 
-- `import "effect-orpc/node"` installs the bridge passively. This is enough for
-  `effect-orpc` to propagate `FiberRefs` across its own split runtime boundaries.
-- `withFiberContext(() => next())` actively seeds the bridge from an external
-  Effect scope, such as framework middleware wrapping an oRPC handler.
+- `import "effect-orpc/node"` installs the bridge passively. This is enough for `effect-orpc` to propagate the current Effect service context across its own split runtime boundaries.
+- `withFiberContext(() => next())` actively seeds the bridge from an external Effect scope, such as framework middleware wrapping an oRPC handler.
 
-Use `withFiberContext` when request-local `FiberRef` state is created outside the
-oRPC pipeline and should be visible inside handlers:
+Use `withFiberContext` when request-local Effect context is created outside the oRPC pipeline and should be visible inside handlers:
 
 ```ts
 import { Hono } from "hono";
@@ -411,24 +417,16 @@ app.use("*", async (c, next) => {
 });
 ```
 
-Importing `withFiberContext` from `effect-orpc/node` also installs the bridge, so
-you do not need a separate side-effect import.
+Importing `withFiberContext` from `effect-orpc/node` also installs the bridge, so you do not need a separate side-effect import.
 
-When a captured fiber context and the application `Layer` / `ManagedRuntime`
-both provide the same service, `effect-orpc` prioritizes the captured context.
-The application layer is treated as the base layer, while the bridge preserves more specific
-request-scoped values such as request IDs, logging annotations, tracing context,
-or scoped overrides when crossing runtime boundaries.
+When a captured fiber context and the application `Layer` / `ManagedRuntime` both provide the same service, `effect-orpc` prioritizes the captured context.
+The application layer is treated as the base layer, while the bridge preserves more specific request-scoped values such as request IDs, logging annotations, tracing context, or scoped overrides when crossing runtime boundaries.
 
-The main package stays runtime-agnostic; `/node` is separate because the bridge
-relies on `AsyncLocalStorage` from `node:async_hooks`.
+The main package stays runtime-agnostic; `/node` is separate because the bridge relies on `AsyncLocalStorage` from `node:async_hooks`.
 
 ## Contract-First Usage
 
-Use `implementEffect(contract, layerOrRuntime)` when you already have an oRPC
-contract and want to keep contract-first enforcement while adding Effect-native
-handlers. Use `eos.provide(layer)` when you want to build procedures directly
-from the default Effect-aware builder.
+Use `implementEffect(contract, layerOrRuntime)` when you already have an oRPC contract and want to keep contract-first enforcement while adding Effect-native handlers. Use `eos.provide(layer)` when you want to build procedures directly from the default Effect-aware builder.
 
 ```ts
 import { Effect } from "effect";
@@ -462,29 +460,21 @@ export const router = oe.router({
 });
 ```
 
-Contract leaves keep the contract-defined input, output, and error surface.
-They add `.effect(...)` alongside existing implementer methods such as
-`.handler(...)` and `.use(...)`, but do not expose contract-changing builder
-methods like `.input(...)` or `.output(...)`.
+Contract leaves keep the contract-defined input, output, and error surface. They add `.effect(...)` alongside existing implementer methods such as `.handler(...)` and `.use(...)`, but do not expose contract-changing builder methods like `.input(...)` or `.output(...)`.
 
-If your contract declares tagged Effect error classes, prefer `eoc.errors(...)`
-instead of raw `oc.errors(...)` so the error schema and metadata are derived
-directly from the `ORPCTaggedError` class.
+If your contract declares tagged Effect error classes, prefer `eoc.errors(...)` instead of raw `oc.errors(...)` so the error schema and metadata are derived directly from the `ORPCTaggedError` class.
 
 ## API Reference
 
 ### `eos`
 
-The default Effect-aware procedure builder. Provide your application services
-with `.provide(layer)`:
+The default Effect-aware procedure builder. Provide your application services with `.provide(layer)`:
 
 ```ts
 const effectProcedure = eos.provide(AppLive);
 ```
 
-Use `makeEffectORPC(runtime)` when a scoped `Layer` should be acquired once and
-released by your application shutdown path, such as a shared cache, database
-pool, HTTP client, or telemetry SDK:
+Use `makeEffectORPC(runtime)` when a scoped `Layer` should be acquired once and released by your application shutdown path, such as a shared cache, database pool, HTTP client, or telemetry SDK:
 
 ```ts
 const runtime = ManagedRuntime.make(AppLive);
@@ -495,8 +485,7 @@ const effectProcedure = makeEffectORPC(runtime);
 await runtime.dispose();
 ```
 
-`makeEffectORPC(builder)` is also available when you need to wrap an existing
-oRPC builder:
+`makeEffectORPC(builder)` is also available when you need to wrap an existing oRPC builder:
 
 ```ts
 const effectAuthedOs = makeEffectORPC(authedBuilder).provide(AppLive);
@@ -527,8 +516,7 @@ const router = oe.router({
 
 An Effect-aware wrapper around oRPC's `oc` contract builder.
 
-Use it when you want contract definitions to accept `ORPCTaggedError` classes
-directly in `.errors(...)` without duplicating the error schema.
+Use it when you want contract definitions to accept `ORPCTaggedError` classes directly in `.errors(...)` without duplicating the error schema.
 
 ```ts
 class UserNotFoundError extends ORPCTaggedError("UserNotFoundError", {
@@ -552,43 +540,43 @@ const contract = {
 
 Wraps an oRPC Builder with Effect support. Available methods:
 
-| Method              | Description                                                                          |
-| ------------------- | ------------------------------------------------------------------------------------ |
-| `.$config(config)`  | Set or override the builder config                                                   |
-| `.$context<U>()`    | Set or override the initial context type                                             |
-| `.$meta(meta)`      | Set or override the initial metadata                                                 |
-| `.$route(route)`    | Set or override the initial route configuration                                      |
-| `.$input(schema)`   | Set or override the initial input schema                                             |
-| `.errors(map)`      | Add type-safe custom errors                                                          |
-| `.meta(meta)`       | Set procedure metadata (merged with existing)                                        |
-| `.route(route)`     | Configure OpenAPI route (merged with existing)                                       |
-| `.input(schema)`    | Define input validation schema                                                       |
-| `.output(schema)`   | Define output validation schema                                                      |
-| `.provide(layer)`   | Provide a base Effect layer to downstream Effect middleware and handlers             |
-| `.provide(tag, fn)` | Provide a request-scoped Effect service to downstream Effect middleware and handlers |
-| `.use(middleware)`  | Add middleware                                                                       |
-| `.traced(name)`     | Add a traceable span for telemetry (optional, defaults to the procedure's path)      |
-| `.handler(handler)` | Define a non-Effect handler (standard oRPC handler)                                  |
-| `.effect(handler)`  | Define the Effect handler                                                            |
-| `.prefix(prefix)`   | Prefix all procedures in the router (for OpenAPI)                                    |
-| `.tag(...tags)`     | Add tags to all procedures in the router (for OpenAPI)                               |
-| `.router(router)`   | Apply all options to a router                                                        |
-| `.lazy(loader)`     | Create and apply options to a lazy-loaded router                                     |
+| Method                    | Description                                                                          |
+| ------------------------- | ------------------------------------------------------------------------------------ |
+| `.$config(config)`        | Set or override the builder config                                                   |
+| `.$context<U>()`          | Set or override the initial context type                                             |
+| `.$meta(meta)`            | Set or override the initial metadata                                                 |
+| `.$route(route)`          | Set or override the initial route configuration                                      |
+| `.$input(schema)`         | Set or override the initial input schema                                             |
+| `.errors(map)`            | Add type-safe custom errors                                                          |
+| `.meta(meta)`             | Set procedure metadata (merged with existing)                                        |
+| `.route(route)`           | Configure OpenAPI route (merged with existing)                                       |
+| `.input(schema)`          | Define input validation schema                                                       |
+| `.output(schema)`         | Define output validation schema                                                      |
+| `.provide(layer)`         | Provide a base Effect layer to downstream Effect middleware and handlers             |
+| `.provide(tag, provider)` | Provide a request-scoped Effect service to downstream Effect middleware and handlers |
+| `.use(middleware)`        | Add middleware                                                                       |
+| `.traced(name)`           | Add a traceable span for telemetry (optional, defaults to the procedure's path)      |
+| `.handler(handler)`       | Define a non-Effect handler (standard oRPC handler)                                  |
+| `.effect(handler)`        | Define the Effect handler                                                            |
+| `.prefix(prefix)`         | Prefix all procedures in the router (for OpenAPI)                                    |
+| `.tag(...tags)`           | Add tags to all procedures in the router (for OpenAPI)                               |
+| `.router(router)`         | Apply all options to a router                                                        |
+| `.lazy(loader)`           | Create and apply options to a lazy-loaded router                                     |
 
 ### `EffectDecoratedProcedure`
 
 The result of calling `.effect()`. Extends standard oRPC `DecoratedProcedure` with Effect type preservation.
 
-| Method                  | Description                                   |
-| ----------------------- | --------------------------------------------- |
-| `.errors(map)`          | Add more custom errors                        |
-| `.meta(meta)`           | Update metadata (merged with existing)        |
-| `.route(route)`         | Update route configuration (merged)           |
-| `.provide(layer)`       | Provide a base Effect layer                   |
-| `.provide(tag, fn)`     | Provide a request-scoped Effect service       |
-| `.use(middleware)`      | Add middleware                                |
-| `.callable(options?)`   | Make procedure directly invocable             |
-| `.actionable(options?)` | Make procedure compatible with server actions |
+| Method                    | Description                                   |
+| ------------------------- | --------------------------------------------- |
+| `.errors(map)`            | Add more custom errors                        |
+| `.meta(meta)`             | Update metadata (merged with existing)        |
+| `.route(route)`           | Update route configuration (merged)           |
+| `.provide(layer)`         | Provide a base Effect layer                   |
+| `.provide(tag, provider)` | Provide a request-scoped Effect service       |
+| `.use(middleware)`        | Add middleware                                |
+| `.callable(options?)`     | Make procedure directly invocable             |
+| `.actionable(options?)`   | Make procedure compatible with server actions |
 
 ### `ORPCTaggedError(tag, options?)`
 

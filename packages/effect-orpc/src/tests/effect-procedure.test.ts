@@ -119,16 +119,55 @@ describe("effectDecoratedProcedure", () => {
   });
 
   describe(".use", () => {
-    it("without map input", () => {
-      const mid = vi.fn();
+    it("without map input", async () => {
+      const mid = vi.fn(({ next }) =>
+        next({ context: { fromMiddleware: true } }),
+      );
 
       const applied = decorated.use(mid);
       expect(applied).not.toBe(decorated);
       expect(applied).toBeInstanceOf(EffectDecoratedProcedure);
 
-      expect(applied["~effect"]).toEqual({
-        ...def,
-        middlewares: [...def.middlewares, mid],
+      expect(applied["~effect"].middlewares).toHaveLength(
+        def.middlewares.length + 1,
+      );
+      expect(applied["~effect"].middlewares[0]).toBe(def.middlewares[0]);
+
+      const wrapped = applied["~effect"].middlewares[1]!;
+      let nextCalls = 0;
+      let nextOptions: unknown;
+      const next = <TContext extends Record<PropertyKey, unknown>>(options?: {
+        context?: TContext;
+      }) => {
+        nextCalls++;
+        nextOptions = options;
+        return Promise.resolve({
+          output: "ok",
+          context: options?.context ?? ({} as TContext),
+        });
+      };
+      await expect(
+        wrapped(
+          {
+            context: {},
+            errors: {},
+            path: [],
+            procedure: applied,
+            signal: undefined,
+            lastEventId: undefined,
+            next,
+          },
+          "input",
+          vi.fn(),
+        ),
+      ).resolves.toEqual({
+        output: "ok",
+        context: { fromMiddleware: true },
+      });
+      expect(mid).toHaveBeenCalledOnce();
+      expect(nextCalls).toBe(1);
+      expect(nextOptions).toEqual({
+        context: { fromMiddleware: true },
       });
 
       // Preserves runtime

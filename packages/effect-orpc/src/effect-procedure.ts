@@ -20,9 +20,11 @@ import { Layer } from "effect";
 
 import {
   createEffectOptionalProviderMiddleware,
+  createEffectOrORPCMiddleware,
   createEffectPipelineMiddleware,
   createEffectProcedureHandler,
   createEffectProviderMiddleware,
+  isDecoratedMiddleware,
   isEffectMiddleware,
 } from "./effect-runtime";
 import { composeSurfaceProxy } from "./extension/compose-surfaces";
@@ -323,18 +325,40 @@ function createEffectProcedureProxy<
             ) => {
               const def = getEffectProcedureDef(context);
               if (!mapInput && isEffectMiddleware(middleware)) {
-                return new EffectDecoratedProcedure(
-                  appendEffectStep(def, {
-                    _tag: "middleware",
-                    middleware,
-                  }),
-                );
+                const step: EffectPipelineStep = {
+                  _tag: "middleware" as const,
+                  middleware,
+                };
+
+                if (def.effectHandler) {
+                  return new EffectDecoratedProcedure(
+                    appendEffectStep(def, step),
+                  );
+                }
+
+                return new EffectDecoratedProcedure({
+                  ...def,
+                  middlewares: addMiddleware(
+                    def.middlewares,
+                    createEffectPipelineMiddleware({
+                      effectErrorMap: state.effectErrorMap,
+                      runner: state.runner,
+                      steps: [step],
+                    }),
+                  ),
+                });
               }
 
               const flushedDef = flushEffectSteps(def);
               const mapped = mapInput
                 ? decorateMiddleware(middleware).mapInput(mapInput)
-                : middleware;
+                : isDecoratedMiddleware(middleware)
+                  ? middleware
+                  : createEffectOrORPCMiddleware({
+                      effectErrorMap: state.effectErrorMap,
+                      middleware: middleware as any,
+                      runner: state.runner,
+                    });
 
               return new EffectDecoratedProcedure({
                 ...flushedDef,

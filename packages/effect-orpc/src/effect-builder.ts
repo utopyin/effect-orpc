@@ -12,8 +12,10 @@ import { Layer, ManagedRuntime } from "effect";
 import { enhanceEffectRouter } from "./effect-enhance-router";
 import { EffectDecoratedProcedure } from "./effect-procedure";
 import {
+  createEffectOrORPCMiddleware,
   createEffectPipelineMiddleware,
   createEffectProcedureHandler,
+  isDecoratedMiddleware,
   isEffectMiddleware,
 } from "./effect-runtime";
 import {
@@ -248,27 +250,25 @@ function createEffectBuilderProxy(
         case "middleware":
           return getOrCreateVirtualMethod(context, prop, () => {
             return (middleware: any) => {
-              if (isEffectMiddleware(middleware)) {
-                const effectMiddleware = createEffectPipelineMiddleware({
-                  effectErrorMap: state.effectErrorMap,
-                  runner: state.runner,
-                  steps: [
-                    ...(state.effectSteps ?? []),
-                    { _tag: "middleware" as const, middleware },
-                  ],
-                });
-
-                return Reflect.apply(
-                  Reflect.get(source, "middleware", source),
-                  source,
-                  [effectMiddleware],
-                );
-              }
+              const effectMiddleware = isEffectMiddleware(middleware)
+                ? createEffectPipelineMiddleware({
+                    effectErrorMap: state.effectErrorMap,
+                    runner: state.runner,
+                    steps: [
+                      ...(state.effectSteps ?? []),
+                      { _tag: "middleware" as const, middleware },
+                    ],
+                  })
+                : createEffectOrORPCMiddleware({
+                    effectErrorMap: state.effectErrorMap,
+                    middleware,
+                    runner: state.runner,
+                  });
 
               return Reflect.apply(
                 Reflect.get(source, "middleware", source),
                 source,
-                [middleware],
+                [effectMiddleware],
               );
             };
           });
@@ -302,7 +302,7 @@ function createEffectBuilderProxy(
         case "use":
           return getOrCreateVirtualMethod(context, prop, () => {
             return (middleware: any, ...rest: unknown[]) => {
-              if (isEffectMiddleware(middleware) && rest.length === 0) {
+              if (rest.length === 0 && isEffectMiddleware(middleware)) {
                 return wrapBuilderLike(
                   source,
                   appendEffectStep(state, {
@@ -316,7 +316,16 @@ function createEffectBuilderProxy(
               const nextBuilder: AnyBuilderLike = Reflect.apply(
                 Reflect.get(flushed.builder, "use", flushed.builder),
                 flushed.builder,
-                [middleware, ...rest],
+                [
+                  rest.length === 0 && !isDecoratedMiddleware(middleware)
+                    ? createEffectOrORPCMiddleware({
+                        effectErrorMap: flushed.state.effectErrorMap,
+                        middleware,
+                        runner: flushed.state.runner,
+                      })
+                    : middleware,
+                  ...rest,
+                ],
               );
               return wrapBuilderLike(nextBuilder, flushed.state);
             };
@@ -347,11 +356,16 @@ function createEffectBuilderProxy(
                   any
                 >["handler"]
               >[0],
-            ) =>
-              new EffectDecoratedProcedure({
-                ...effectDef,
+            ) => {
+              const flushed = flushEffectSteps(source, state);
+              return new EffectDecoratedProcedure({
+                ...flushed.builder["~orpc"],
+                effectErrorMap: flushed.state.effectErrorMap,
+                runner: flushed.state.runner,
+                effectSteps: flushed.state.effectSteps,
                 handler,
               });
+            };
           });
         case "router":
           return getOrCreateVirtualMethod(context, prop, () => {

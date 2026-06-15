@@ -134,11 +134,17 @@ export type EffectProcedureHandler<
     EffectErrorConstructorMap<TEffectErrorMap>,
     TMeta
   >,
-) => Effect.fn.Return<
-  THandlerOutput,
-  EffectErrorMapToUnion<TEffectErrorMap> | ORPCError<ORPCErrorCode, unknown>,
-  TRequirementsProvided
->;
+) =>
+  | Effect.Effect<
+      THandlerOutput,
+      EffectOperationError<TEffectErrorMap>,
+      TRequirementsProvided
+    >
+  | EffectCallbackGenerator<
+      THandlerOutput,
+      TEffectErrorMap,
+      TRequirementsProvided
+    >;
 
 export interface EffectProcedureHandlerConfig {
   readonly effectFn: EffectProcedureHandler<any, any, any, any, any, any>;
@@ -148,6 +154,20 @@ export interface EffectProcedureHandlerConfig {
 
 type EffectTagService<T extends EffectContext.Key<any, any>> =
   T extends EffectContext.Key<any, infer S> ? S : never;
+
+type EffectOperationError<TEffectErrorMap extends EffectErrorMap> =
+  | EffectErrorMapToUnion<TEffectErrorMap>
+  | ORPCError<ORPCErrorCode, unknown>;
+
+type EffectCallbackGenerator<
+  TReturn,
+  TEffectErrorMap extends EffectErrorMap,
+  TRequirementsProvided,
+> = Effect.fn.Return<
+  TReturn,
+  EffectOperationError<TEffectErrorMap>,
+  TRequirementsProvided
+>;
 
 export type EffectProvider<
   TCurrentContext extends Context,
@@ -163,11 +183,17 @@ export type EffectProvider<
     EffectErrorConstructorMap<TEffectErrorMap>,
     TMeta
   >,
-) => Effect.Effect<
-  EffectTagService<TTag>,
-  EffectErrorMapToUnion<TEffectErrorMap> | ORPCError<ORPCErrorCode, unknown>,
-  TRequirementsProvided
->;
+) =>
+  | Effect.Effect<
+      EffectTagService<TTag>,
+      EffectOperationError<TEffectErrorMap>,
+      TRequirementsProvided
+    >
+  | EffectCallbackGenerator<
+      EffectTagService<TTag>,
+      TEffectErrorMap,
+      TRequirementsProvided
+    >;
 
 export type EffectOptionalProvider<
   TCurrentContext extends Context,
@@ -183,11 +209,17 @@ export type EffectOptionalProvider<
     EffectErrorConstructorMap<TEffectErrorMap>,
     TMeta
   >,
-) => Effect.Effect<
-  Option.Option<EffectTagService<TTag>>,
-  EffectErrorMapToUnion<TEffectErrorMap> | ORPCError<ORPCErrorCode, unknown>,
-  TRequirementsProvided
->;
+) =>
+  | Effect.Effect<
+      Option.Option<EffectTagService<TTag>>,
+      EffectOperationError<TEffectErrorMap>,
+      TRequirementsProvided
+    >
+  | EffectCallbackGenerator<
+      Option.Option<EffectTagService<TTag>>,
+      TEffectErrorMap,
+      TRequirementsProvided
+    >;
 
 interface EffectMiddlewareNext<
   TOutput,
@@ -319,10 +351,15 @@ export type EffectOrORPCMiddleware<
 ) =>
   | MiddlewareResult<TOutContext, TOutput>
   | PromiseLike<MiddlewareResult<TOutContext, TOutput>>
-  | Effect.fn.Return<
+  | void
+  | Effect.Effect<
       EffectMiddlewareResult<TOutContext, TOutput> | void,
-      | EffectErrorMapToUnion<TEffectErrorMap>
-      | ORPCError<ORPCErrorCode, unknown>,
+      EffectOperationError<TEffectErrorMap>,
+      TRequirementsProvided
+    >
+  | EffectCallbackGenerator<
+      EffectMiddlewareResult<TOutContext, TOutput> | void,
+      TEffectErrorMap,
       TRequirementsProvided
     >;
 
@@ -370,11 +407,18 @@ export type EffectMiddleware<
     TEffectErrorMap,
     TRequirementsProvided
   >,
-) => Effect.fn.Return<
-  EffectMiddlewareResult<TOutContext, TOutput> | void,
-  EffectErrorMapToUnion<TEffectErrorMap> | ORPCError<ORPCErrorCode, unknown>,
-  TRequirementsProvided
->;
+) =>
+  | Effect.Effect<
+      EffectMiddlewareResult<TOutContext, TOutput> | void,
+      EffectOperationError<TEffectErrorMap>,
+      TRequirementsProvided
+    >
+  | EffectCallbackGenerator<
+      EffectMiddlewareResult<TOutContext, TOutput> | void,
+      TEffectErrorMap,
+      TRequirementsProvided
+    >
+  | void;
 
 type EffectProvideStep = {
   readonly _tag: "provide";

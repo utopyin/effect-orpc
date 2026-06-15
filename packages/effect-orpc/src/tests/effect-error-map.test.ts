@@ -1,9 +1,9 @@
 import { fallbackORPCErrorMessage, ORPCError } from "@orpc/client";
-import { Effect, Layer, ManagedRuntime } from "effect";
+import { Effect } from "effect";
 import { describe, expect, expectTypeOf, it } from "vitest";
 import { z } from "zod";
 
-import { makeEffectORPC } from "../effect-builder";
+import { eos } from "../effect-builder";
 import type {
   EffectErrorMap,
   EffectErrorMapToUnion,
@@ -192,8 +192,7 @@ describe("effectErrorMapToErrorMap", () => {
 });
 
 describe("effectBuilder with EffectErrorMap", () => {
-  const runtime = ManagedRuntime.make(Layer.empty);
-  const effectProcedure = makeEffectORPC(runtime);
+  const effectProcedure = eos;
 
   it("should support errors() with traditional format", () => {
     const builder = effectProcedure.errors({
@@ -309,8 +308,7 @@ describe("effectBuilder with EffectErrorMap", () => {
 });
 
 describe("effectDecoratedProcedure.errors()", () => {
-  const runtime = ManagedRuntime.make(Layer.empty);
-  const effectProcedure = makeEffectORPC(runtime);
+  const effectProcedure = eos;
 
   it("should support adding errors to procedure", () => {
     const procedure = effectProcedure

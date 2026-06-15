@@ -1,0 +1,70 @@
+---
+title: "Troubleshooting"
+description: "Common issues when using effect-orpc."
+icon: "circle-help"
+---
+
+## TypeScript says a service is missing
+
+The handler yielded a service that has not been provided by the builder, a request-scoped provider, or the runtime passed to `makeEffectORPC`.
+
+```ts title="fix.ts"
+const procedure = eos.provide(UsersRepo.Default).effect(function* () {
+  return yield* UsersRepo.list();
+});
+```
+
+If the service is request-scoped, provide it from context:
+
+```ts title="request-scoped-fix.ts"
+const procedure = eos
+  .$context<{ user: User }>()
+  .provide(CurrentUser, ({ context }) => Effect.succeed(context.user));
+```
+
+## A tagged error is not typed on the client
+
+Make sure the tagged error class is registered in `.errors(...)` or in the `eoc.errors(...)` contract definition.
+
+```ts title="error-registration.ts"
+const procedure = eos.errors({ UserNotFoundError });
+```
+
+## Request-local logs or annotations disappear
+
+If request-local `FiberRef` state is created outside the oRPC pipeline in Node, use the Node bridge.
+
+```ts title="node-bridge.ts"
+import { withFiberContext } from "effect-orpc/node";
+```
+
+See [Node fiber context bridge](/guides/node-fiber-context).
+
+## Scoped resources are recreated too often
+
+Use a caller-owned `ManagedRuntime` for long-lived scoped resources.
+
+```ts title="runtime.ts"
+const runtime = ManagedRuntime.make(AppLive);
+const procedure = makeEffectORPC(runtime);
+```
+
+Dispose the runtime during application shutdown.
+
+## Native middleware split my Effect pipeline
+
+Native oRPC middleware can split contiguous Effect steps into multiple runtime boundaries.
+
+Prefer Effect middleware when the middleware needs Effect context. If you must use native middleware and need `FiberRef` continuity in Node, import the Node bridge.
+
+## Where to look next
+
+<CardGroup cols={2}>
+  <Card title="Mental model" icon="brain" href="/getting-started/mental-model">
+    Review the main runtime and builder concepts.
+  </Card>
+
+  <Card title="Runtime management" icon="server-cog" href="/capabilities/runtime-management">
+    Choose between layers and caller-owned runtimes.
+  </Card>
+</CardGroup>

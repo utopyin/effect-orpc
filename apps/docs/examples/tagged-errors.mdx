@@ -1,0 +1,47 @@
+---
+title: "Tagged errors"
+description: "Return typed Effect errors from procedures."
+icon: "minus-octagon"
+---
+
+This example defines a typed error with data and yields it from a handler.
+
+```ts title="errors.ts"
+import { ORPCTaggedError } from "effect-orpc";
+import * as z from "zod";
+
+class PermissionDenied extends ORPCTaggedError("PermissionDenied", {
+  code: "FORBIDDEN",
+  status: 403,
+  message: "Permission denied",
+  schema: z.object({ requiredRole: z.string(), actualRole: z.string() }),
+}) {}
+```
+
+```ts title="procedure.ts"
+const adminProcedure = eos
+  .$context<{ role: "viewer" | "admin" }>()
+  .errors({ PermissionDenied })
+  .use(function* ({ context }) {
+    if (context.role !== "admin") {
+      return yield* new PermissionDenied({
+        data: { requiredRole: "admin", actualRole: context.role },
+      });
+    }
+  });
+
+export const deleteUser = adminProcedure.effect(function* () {
+  return { deleted: true };
+});
+```
+
+## Why this shape
+
+- the error has a stable oRPC code
+- the status is explicit
+- the data schema is typed
+- the handler can yield the error directly
+
+## Next step
+
+See the complete [Hono request context example](/examples/hono-request-context).

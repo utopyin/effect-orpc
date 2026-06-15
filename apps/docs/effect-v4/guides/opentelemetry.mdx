@@ -1,0 +1,66 @@
+---
+title: "OpenTelemetry"
+description: "Export effect-orpc procedure spans through Effect's OpenTelemetry integration."
+icon: "radar"
+---
+
+`effect-orpc` creates Effect spans around procedures. To export them, include an OpenTelemetry layer in your application runtime.
+
+## Install OpenTelemetry packages
+
+```bash title="Install packages"
+bun add @effect/opentelemetry @opentelemetry/exporter-trace-otlp-http @opentelemetry/sdk-trace-base
+```
+
+## Create a tracing layer
+
+```ts title="tracing.ts"
+import { NodeSdk } from "@effect/opentelemetry";
+import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
+import { BatchSpanProcessor } from "@opentelemetry/sdk-trace-base";
+
+const NodeSdkLive = NodeSdk.layer(() => ({
+  resource: { serviceName: "my-api" },
+  spanProcessor: new BatchSpanProcessor(
+    new OTLPTraceExporter({
+      url: "http://localhost:4318/v1/traces",
+    }),
+  ),
+}));
+```
+
+## Add it to your runtime
+
+```ts title="runtime.ts"
+const AppLive = Layer.mergeAll(UsersRepoLive).pipe(
+  Layer.provideMerge(NodeSdkLive),
+);
+
+export const runtime = ManagedRuntime.make(AppLive);
+export const effectProcedure = makeEffectORPC(runtime);
+```
+
+## Customize procedure span names
+
+```ts title="custom-span.ts"
+const getUser = effectProcedure
+  .traced("users.get_by_id")
+  .input(z.object({ id: z.string() }))
+  .effect(function* ({ input }) {
+    const usersRepo = yield* UsersRepo;
+    return yield* usersRepo.findById(input.id);
+  });
+```
+
+## Local collector
+
+The repository Hono example includes an optional telemetry stack.
+
+```bash title="Run collector"
+cd examples/hono
+docker compose up
+```
+
+## Next step
+
+Review the [Tracing capability](/effect-v4/capabilities/tracing) for how spans are named by default.

@@ -1,0 +1,97 @@
+---
+title: "Hono"
+description: "Mount an effect-orpc router in a Hono application."
+icon: "route"
+---
+
+The repository includes a complete Hono example in `examples/hono`.
+
+## Create handlers
+
+```ts title="orpc.ts"
+import { OpenAPIHandler } from "@orpc/openapi/fetch";
+import { RPCHandler } from "@orpc/server/fetch";
+
+import { router } from "./router";
+
+export const rpcHandler = new RPCHandler(router);
+export const openAPIHandler = new OpenAPIHandler(router);
+```
+
+## Mount in Hono
+
+```ts title="app.ts"
+import { Hono } from "hono";
+
+import { openAPIHandler, rpcHandler } from "./orpc";
+
+const app = new Hono();
+
+app.use("/rpc/*", async (c, next) => {
+  const result = await rpcHandler.handle(c.req.raw, {
+    prefix: "/rpc",
+    context: {
+      requestId: c.req.header("x-request-id") ?? crypto.randomUUID(),
+    },
+  });
+
+  if (result.matched) return result.response;
+  return next();
+});
+
+app.use("/api/*", async (c, next) => {
+  const result = await openAPIHandler.handle(c.req.raw, {
+    prefix: "/api",
+    context: {
+      requestId: c.req.header("x-request-id") ?? crypto.randomUUID(),
+    },
+  });
+
+  if (result.matched) return result.response;
+  return next();
+});
+
+export default app;
+```
+
+## Add typed context
+
+```ts title="context.ts"
+type RequestContext = {
+  requestId: string;
+  role: "viewer" | "operator" | "admin";
+};
+
+const procedure = makeEffectORPC(runtime).$context<RequestContext>();
+```
+
+## Add fiber context propagation
+
+If Hono middleware creates request-local Effect `FiberRef` state before the oRPC handler runs, wrap `next()` with `withFiberContext`.
+
+```ts title="fiber-context.ts"
+import { Effect } from "effect";
+import { withFiberContext } from "effect-orpc/node";
+
+app.use("*", async (_c, next) => {
+  await Effect.runPromise(
+    Effect.gen(function* () {
+      yield* Effect.annotateLogsScoped({ requestId: crypto.randomUUID() });
+      yield* withFiberContext(() => next());
+    }),
+  );
+});
+```
+
+## Runnable example
+
+```bash title="Run the repository example"
+cd examples/hono
+bun install
+bun start
+```
+
+## Next steps
+
+- Use [Node fiber context bridge](/guides/node-fiber-context) for request-local `FiberRef` propagation.
+- Use [OpenTelemetry guide](/guides/opentelemetry) for exporting spans.

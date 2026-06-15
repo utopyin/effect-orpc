@@ -1,0 +1,40 @@
+---
+title: "effect-orpc/node"
+description: "Node-specific Effect context bridge exports."
+icon: "server"
+---
+
+The `effect-orpc/node` entrypoint installs a Node `AsyncLocalStorage` bridge for the current Effect context.
+
+```ts title="side-effect-import.ts"
+import "effect-orpc/node";
+```
+
+## `withFiberContext`
+
+```ts title="import.ts"
+import { withFiberContext } from "effect-orpc/node";
+```
+
+`withFiberContext(fn)` captures the current Effect context and runs an async callback inside the Node bridge.
+
+```ts title="with-fiber-context.ts"
+await Effect.runPromise(
+  Effect.gen(function* () {
+    yield* Effect.annotateLogsScoped({ requestId: "req_123" });
+    yield* withFiberContext(() => next());
+  }),
+);
+```
+
+## When to import
+
+| Need                                                                       | Import                                                |
+| -------------------------------------------------------------------------- | ----------------------------------------------------- |
+| Passive bridge across split `effect-orpc` runtime boundaries               | `import "effect-orpc/node"`                           |
+| Capture outer Effect request context before calling framework continuation | `import { withFiberContext } from "effect-orpc/node"` |
+
+## See also
+
+- [Node context bridge](/effect-v4/guides/node-fiber-context)
+- [Hono guide](/effect-v4/guides/hono)

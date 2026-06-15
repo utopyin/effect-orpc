@@ -1,0 +1,44 @@
+---
+title: "eoc"
+description: "Effect-aware oRPC contract builder."
+icon: "file-code"
+---
+
+`eoc` is an Effect-aware wrapper around oRPC's `oc` contract builder.
+
+Use it when contract definitions should accept `ORPCTaggedError` classes directly in `.errors(...)`.
+
+```ts title="import.ts"
+import { eoc } from "effect-orpc";
+```
+
+## Define a contract leaf
+
+```ts title="contract.ts"
+const contract = {
+  users: {
+    get: eoc
+      .errors({ UserNotFoundError })
+      .input(z.object({ id: z.string() }))
+      .output(z.object({ id: z.string(), name: z.string() })),
+  },
+};
+```
+
+## Router-level options
+
+```ts title="contract-router.ts"
+const contract = eoc
+  .prefix("/api")
+  .tag("Users")
+  .router({
+    users: {
+      list: eoc.route({ method: "GET", path: "/users" }).output(z.array(User)),
+    },
+  });
+```
+
+## See also
+
+- [Contract-first APIs](/effect-v4/capabilities/contract-first)
+- [`implementEffect`](/effect-v4/reference/implement-effect)

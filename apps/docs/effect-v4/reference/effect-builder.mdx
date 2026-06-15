@@ -1,0 +1,80 @@
+---
+title: "EffectBuilder"
+description: "Reference for the Effect-aware builder surface."
+icon: "blocks"
+---
+
+`EffectBuilder` wraps an oRPC builder with Effect-aware methods while preserving the standard oRPC builder surface.
+
+## Definition flow
+
+```ts title="flow.ts"
+const procedure = eos
+  .$context<RequestContext>()
+  .provide(AppLive)
+  .errors({ UserNotFoundError })
+  .input(GetUserInput)
+  .output(User)
+  .use(authMiddleware)
+  .traced("users.get")
+  .effect(function* ({ input }) {
+    const usersRepo = yield* UsersRepo;
+    return yield* usersRepo.findById(input.id);
+  });
+```
+
+## Callback shapes
+
+Effect-native callbacks accepted by `.effect(...)`, `.provide(...)`, `.provideOptional(...)`, `.use(...)`, and `.middleware(...)` can be generator functions or callbacks that return an `Effect`.
+
+```ts title="callback-shapes.ts"
+effectProcedure.effect(function* () {
+  const usersRepo = yield* UsersRepo;
+  return yield* usersRepo.list();
+});
+
+effectProcedure.effect(
+  Effect.fn("users.list")(function* () {
+    const usersRepo = yield* UsersRepo;
+    return yield* usersRepo.list();
+  }),
+);
+
+effectProcedure.effect(() =>
+  Effect.gen(function* () {
+    const usersRepo = yield* UsersRepo;
+    return yield* usersRepo.list();
+  }),
+);
+```
+
+## Method summary
+
+| Category      | Methods                                                 |
+| ------------- | ------------------------------------------------------- |
+| Configuration | `.$config`, `.$context`, `.$meta`, `.$route`, `.$input` |
+| Schemas       | `.input`, `.output`                                     |
+| Errors        | `.errors`                                               |
+| Services      | `.provide`, `.provideOptional`                          |
+| Middleware    | `.use`, `.middleware`                                   |
+| Handlers      | `.handler`, `.effect`                                   |
+| Telemetry     | `.traced`                                               |
+| Routers       | `.prefix`, `.tag`, `.router`, `.lazy`                   |
+
+## Decorated procedures
+
+Calling `.effect(...)` returns an `EffectDecoratedProcedure`, which keeps procedure helpers such as:
+
+- `.errors(...)`
+- `.meta(...)`
+- `.route(...)`
+- `.provide(...)`
+- `.provideOptional(...)`
+- `.use(...)`
+- `.callable(...)`
+- `.actionable(...)`
+
+## See also
+
+- [Effect procedures](/effect-v4/capabilities/effect-procedures)
+- [Middleware](/effect-v4/capabilities/middleware)

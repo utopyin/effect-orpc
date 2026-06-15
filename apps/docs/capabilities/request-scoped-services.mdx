@@ -1,0 +1,102 @@
+---
+title: "Request-scoped services"
+description: "Build Effect services from oRPC context and input for one request."
+icon: "pipe-circle-check"
+---
+
+Use `.provide(tag, provider)` when a service depends on the current request.
+
+Providers can be generator callbacks, `Effect.fn(...)` callbacks, or functions that return an `Effect`.
+
+Common examples:
+
+- current user
+- request ID
+- tenant ID
+- authorization scope
+- locale
+
+## Provide from context
+
+```ts title="current-user.ts"
+import { Context, Effect } from "effect";
+
+class CurrentUser extends Context.Tag("CurrentUser")<
+  CurrentUser,
+  { id: string; role: "admin" | "member" }
+>() {}
+
+const authedProcedure = eos
+  .provide(AppLive)
+  .$context<{ user: { id: string; role: "admin" | "member" } }>()
+  .provide(CurrentUser, ({ context }) => Effect.succeed(context.user));
+
+const me = authedProcedure.effect(function* () {
+  return yield* CurrentUser;
+});
+```
+
+## Effect-returning providers
+
+Use an Effect-returning provider when the service construction is already expressed as an `Effect`, or when you want to keep a named `Effect.fn(...)` span.
+
+```ts title="effect-provider.ts"
+const authedProcedure = eos.$context<{ userId: string }>().provide(
+  CurrentUser,
+  Effect.fn("current-user.resolve")(function* ({ context }) {
+    return yield* UsersRepo.findById(context.userId);
+  }),
+);
+
+const tenantProcedure = eos
+  .input(z.object({ tenantId: z.string() }))
+  .provide(TenantId, ({ input }) =>
+    Effect.gen(function* () {
+      yield* Effect.logDebug("resolving tenant");
+      return input.tenantId;
+    }),
+  );
+```
+
+## Provide from input
+
+Providers can also use parsed input.
+
+```ts title="tenant.ts"
+class TenantId extends Context.Tag("TenantId")<TenantId, string>() {}
+
+const tenantProcedure = eos
+  .provide(AppLive)
+  .input(z.object({ tenantId: z.string() }))
+  .provide(TenantId, ({ input }) => Effect.succeed(input.tenantId))
+  .effect(function* () {
+    const tenantId = yield* TenantId;
+    return yield* ProjectsRepo.listForTenant(tenantId);
+  });
+```
+
+## Optional providers
+
+Use `.provideOptional(...)` when a service may be absent. The provider returns an `Option` and does not satisfy required service access. Optional providers support the same generator and Effect-returning callback shapes.
+
+```ts title="optional-current-user.ts"
+import { Option } from "effect";
+
+const maybeAuthed = eos
+  .$context<{ user?: { id: string } }>()
+  .provideOptional(CurrentUser, ({ context }) =>
+    Effect.succeed(Option.fromNullable(context.user)),
+  )
+  .effect(function* () {
+    return yield* Effect.serviceOption(CurrentUser);
+  });
+```
+
+<Note>
+  Optional providers are useful for anonymous-or-authenticated routes. If a
+  handler requires the service, use `.provide(...)` instead.
+</Note>
+
+## Next step
+
+Add client-visible failures with [Typed errors](/capabilities/typed-errors).

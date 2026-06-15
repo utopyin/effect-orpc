@@ -1,0 +1,70 @@
+---
+title: "Input and output schemas"
+description: "Use oRPC-compatible Standard Schema validators with Effect handlers."
+icon: "toilet-paper-check"
+---
+
+`effect-orpc` keeps oRPC's input and output schema model. Use `.input(...)` and `.output(...)` before `.effect(...)`.
+
+```ts title="schemas.ts"
+import * as z from "zod";
+
+const GetUserInput = z.object({
+  id: z.string().min(1),
+});
+
+const User = z.object({
+  id: z.string(),
+  name: z.string(),
+});
+
+export const getUser = effectProcedure
+  .input(GetUserInput)
+  .output(User)
+  .effect(function* ({ input }) {
+    const usersRepo = yield* UsersRepo;
+    return yield* usersRepo.findById(input.id);
+  });
+```
+
+## Inferred input
+
+The handler sees the parsed schema output as `input`.
+
+```ts title="parsed-input.ts"
+const SearchInput = z.object({
+  query: z.string().trim(),
+  limit: z.number().int().positive().default(20),
+});
+
+const search = effectProcedure.input(SearchInput).effect(function* ({ input }) {
+  // input.limit is a number, including the default when omitted.
+  const usersRepo = yield* UsersRepo;
+  return yield* usersRepo.search(input.query, input.limit);
+});
+```
+
+## Output validation
+
+Use `.output(...)` for public response contracts.
+
+```ts title="output.ts"
+const PublicUser = z.object({
+  id: z.string(),
+  name: z.string(),
+});
+
+const me = effectProcedure.output(PublicUser).effect(function* () {
+  const user = yield* CurrentUser;
+  return user;
+});
+```
+
+<Warning>
+  Output schemas validate what leaves the procedure. Keep internal fields out of
+  public output schemas unless they are intentionally part of the API.
+</Warning>
+
+## Next step
+
+Provide services with [Service injection](/effect-v4/capabilities/service-injection).

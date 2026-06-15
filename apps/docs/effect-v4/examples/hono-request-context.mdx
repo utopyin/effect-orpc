@@ -1,0 +1,54 @@
+---
+title: "Hono request context"
+description: "The repository's full Hono, oRPC, Effect, and telemetry example."
+icon: "route"
+---
+
+The repository includes a runnable Hono example in `examples/hono`.
+
+It demonstrates:
+
+- Hono request middleware
+- oRPC RPC and OpenAPI handlers
+- direct builder routes
+- contract-first routes
+- request context passed into handlers
+- request-scoped Effect services
+- traditional oRPC errors and tagged Effect errors
+- OpenTelemetry runtime setup
+- Node Effect context propagation with `withFiberContext`
+
+## Run it
+
+```bash title="Run the Hono example"
+cd examples/hono
+bun install
+bun start
+```
+
+The API is served on `http://localhost:3000/api`.
+
+The RPC endpoint is served on `http://localhost:3000/rpc`.
+
+OpenAPI docs are available at `http://localhost:3000/docs`.
+
+## Optional telemetry stack
+
+```bash title="Start telemetry dependencies"
+cd examples/hono
+docker compose up
+```
+
+## Where to look
+
+| File                              | What it shows                                 |
+| --------------------------------- | --------------------------------------------- |
+| `examples/hono/orpc/router.ts`    | Direct builder and contract-first procedures. |
+| `examples/hono/runtime.ts`        | `ManagedRuntime` and OpenTelemetry setup.     |
+| `examples/hono/app.ts`            | Hono mounting of oRPC handlers.               |
+| `examples/hono/http.ts`           | Request context construction.                 |
+| `examples/hono/services/order.ts` | Effect service used by procedures.            |
+
+## Related guide
+
+Read [Hono guide](/effect-v4/guides/hono) for the smaller integration recipe.

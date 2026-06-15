@@ -1,0 +1,56 @@
+---
+title: "makeEffectORPC"
+description: "Create an Effect-aware builder from a runtime, layer, or existing oRPC builder."
+icon: "factory"
+---
+
+`makeEffectORPC` creates an Effect-aware oRPC builder.
+
+```ts title="import.ts"
+import { makeEffectORPC } from "effect-orpc";
+```
+
+## With a Layer
+
+Pass a `Layer` directly when per-call acquisition is acceptable.
+
+```ts title="layer.ts"
+const effectProcedure = makeEffectORPC(AppLive);
+```
+
+This is equivalent in lifecycle terms to `makeEffectORPC().provide(AppLive)` or `eos.provide(AppLive)`.
+
+## With a ManagedRuntime
+
+```ts title="managed-runtime.ts"
+const runtime = ManagedRuntime.make(AppLive);
+
+const effectProcedure = makeEffectORPC(runtime);
+
+await runtime.dispose();
+```
+
+Use this when the application owns runtime acquisition and shutdown. A caller-owned runtime is the right choice for scoped resources that should stay open across requests, such as database pools or telemetry SDKs.
+
+## With an existing builder
+
+```ts title="existing-builder.ts"
+const authedOs = os.$context<{ userId: string }>();
+
+const effectAuthedOs = makeEffectORPC(authedOs).provide(AppLive);
+```
+
+Use this when you already have oRPC builder configuration and want to add Effect support.
+
+## With defaults
+
+```ts title="default.ts"
+const effectProcedure = makeEffectORPC().provide(AppLive);
+```
+
+This is equivalent in spirit to using `eos`.
+
+## See also
+
+- [Runtime management](/capabilities/runtime-management)
+- [`eos`](/reference/eos)

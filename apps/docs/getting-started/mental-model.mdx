@@ -1,0 +1,74 @@
+---
+title: "Mental model"
+description: "How effect-orpc combines oRPC builders with Effect runtimes, services, errors, and middleware."
+icon: "brain"
+---
+
+Think of `effect-orpc` as a thin Effect-aware layer around oRPC.
+
+It does not replace oRPC. It lets you keep oRPC's routing, validation, contracts, middleware, and client surface while using Effect for implementation logic.
+
+## Core pieces
+
+| Piece                     | Role                                                                        |
+| ------------------------- | --------------------------------------------------------------------------- |
+| `eos`                     | Default Effect-aware oRPC builder.                                          |
+| `.provide(layer)`         | Provides base Effect services to downstream middleware and handlers.        |
+| `.provide(tag, provider)` | Builds a request-scoped service from oRPC context and input.                |
+| `.effect(handler)`        | Defines a procedure handler as a generator or Effect-returning callback.    |
+| `ORPCTaggedError`         | Defines yieldable Effect errors that map to oRPC errors.                    |
+| `makeEffectORPC(runtime)` | Uses a caller-owned `ManagedRuntime` instead of acquiring a layer per call. |
+
+## Builder-first flow
+
+Most applications start by creating a reusable procedure builder:
+
+```ts title="procedure.ts"
+import { eos } from "effect-orpc";
+
+export const publicProcedure = eos.provide(AppLive);
+```
+
+Then each route adds input, output, errors, route metadata, middleware, and finally a handler:
+
+```ts title="users.ts"
+export const getUser = publicProcedure
+  .input(GetUserInput)
+  .output(User)
+  .errors({ UserNotFoundError })
+  .effect(function* ({ input }) {
+    const user = yield* UsersRepo.findById(input.id);
+    if (!user) return yield* new UserNotFoundError({ data: { id: input.id } });
+    return user;
+  });
+```
+
+## Runtime boundaries
+
+Effect-native steps are batched into one runtime boundary, so `Effect.runPromiseExit` runs only once when possible. Effect-native steps include `.provide(...)`, `.provideOptional(...)`, generator middleware, Effect-returning middleware, and `.effect(...)` handlers.
+
+```ts title="one-boundary.ts"
+eos
+  .provide(AppLive)
+  .provide(CurrentUser, ({ context }) => Effect.succeed(context.user))
+  .use(function* ({ next }) {
+    const user = yield* CurrentUser;
+    return yield* next({ context: { userId: user.id } });
+  })
+  .effect(function* ({ context }) {
+    const user = yield* CurrentUser;
+    return `${context.userId}:${user.id}`;
+  });
+```
+
+Native oRPC middleware can split the Effect pipeline. Pending Effect-native steps are flushed before the native middleware, and later Effect-native steps start another boundary.
+
+If the Node bridge is installed, `effect-orpc` carries current `FiberRefs` through native oRPC continuations and merges them into the next Effect boundary. Use the Node bridge guide when request-local Effect state must cross those split boundaries in Node.
+
+## Guides
+
+Guides cover concrete integrations and examples such as Hono, OpenTelemetry, the Node fiber context bridge, and testing.
+
+## Next step
+
+Continue to [Effect procedures](/capabilities/effect-procedures).

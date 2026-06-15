@@ -1,0 +1,56 @@
+---
+title: "Node context bridge"
+description: "Propagate Effect context across Node AsyncLocalStorage boundaries."
+icon: "bridge"
+---
+
+The `/node` entrypoint installs an `AsyncLocalStorage` bridge for the current Effect context.
+
+Use it when request-local Effect services, references, log annotations, or tracing context are created outside the oRPC pipeline and should be visible inside procedures.
+
+## Passive bridge
+
+Import the Node entrypoint for continuity across internal `effect-orpc` runtime boundaries.
+
+```ts title="entry.ts"
+import "effect-orpc/node";
+```
+
+## Active bridge with `withFiberContext`
+
+Use `withFiberContext` when framework middleware runs an outer Effect and then calls into oRPC.
+
+```ts title="middleware.ts"
+import { Effect } from "effect";
+import { withFiberContext } from "effect-orpc/node";
+
+app.use("*", async (c, next) => {
+  await Effect.runPromise(
+    Effect.gen(function* () {
+      yield* Effect.annotateLogsScoped({
+        requestId: c.req.header("x-request-id") ?? crypto.randomUUID(),
+      });
+
+      yield* withFiberContext(() => next());
+    }),
+  );
+});
+```
+
+## Priority rules
+
+When captured request context and the application runtime both provide the same service, `effect-orpc` prioritizes the captured request context.
+
+That makes the application runtime the base layer while request-local services, annotations, tracing context, or scoped overrides win for the current request.
+
+## When not to use it
+
+You do not need the Node bridge if:
+
+- all request-local services are provided inside the `effect-orpc` builder pipeline
+- you are not using Node
+- you do not rely on request-local Effect context outside oRPC
+
+## Next step
+
+See the [Hono guide](/effect-v4/guides/hono) for a concrete framework integration.

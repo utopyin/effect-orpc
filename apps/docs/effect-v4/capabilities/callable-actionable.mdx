@@ -1,0 +1,55 @@
+---
+title: "Callable and actionable procedures"
+description: "Invoke Effect procedures directly or adapt them to server action surfaces."
+icon: "brackets-round"
+---
+
+Effect procedures preserve oRPC's decorated procedure helpers.
+
+## Callable procedures
+
+Use `.callable()` to turn a procedure into a function while preserving the procedure surface.
+
+```ts title="callable.ts"
+const getUser = effectProcedure
+  .input(z.object({ id: z.string() }))
+  .effect(function* ({ input }) {
+    const usersRepo = yield* UsersRepo;
+    return yield* usersRepo.findById(input.id);
+  });
+
+const callGetUser = getUser.callable();
+
+const user = await callGetUser({ id: "1" });
+```
+
+Useful cases:
+
+- examples
+- tests
+- scripts
+- internal invocation without HTTP
+
+## Actionable procedures
+
+Use `.actionable(...)` where you already use oRPC's server action integration.
+
+```ts title="actionable.ts"
+const createUserAction = effectProcedure
+  .input(z.object({ name: z.string() }))
+  .effect(function* ({ input }) {
+    const usersRepo = yield* UsersRepo;
+    return yield* usersRepo.create(input.name);
+  })
+  .actionable();
+```
+
+<Note>
+  `effect-orpc` does not change the semantics of oRPC's callable or actionable
+  helpers. It preserves the Effect-aware procedure metadata while forwarding to
+  oRPC behavior.
+</Note>
+
+## Next step
+
+Compose routers with [Router composition](/effect-v4/capabilities/router-composition).

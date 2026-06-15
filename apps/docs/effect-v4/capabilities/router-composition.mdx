@@ -1,0 +1,60 @@
+---
+title: "Router composition"
+description: "Apply Effect-aware options to routers, lazy routers, prefixes, and tags."
+icon: "folder-tree"
+---
+
+`effect-orpc` supports oRPC router composition patterns.
+
+## Apply options to a router
+
+```ts title="router.ts"
+const usersRouter = effectProcedure.router({
+  list: effectProcedure.effect(function* () {
+    const usersRepo = yield* UsersRepo;
+    return yield* usersRepo.list();
+  }),
+
+  get: effectProcedure.input(z.object({ id: z.string() })).effect(function* ({
+    input,
+  }) {
+    const usersRepo = yield* UsersRepo;
+    return yield* usersRepo.findById(input.id);
+  }),
+});
+```
+
+## Prefix and tag a router
+
+```ts title="prefix-and-tag.ts"
+export const apiRouter = effectProcedure.prefix("/api").tag("Users").router({
+  users: usersRouter,
+});
+```
+
+## Lazy routers
+
+Use `.lazy(...)` for lazy-loaded routers.
+
+```ts title="lazy.ts"
+export const router = effectProcedure.lazy(async () => ({
+  default: await import("./users-router").then((module) => module.usersRouter),
+}));
+```
+
+## Mix router leaves
+
+Routers can contain standard oRPC procedures and Effect procedures.
+
+```ts title="mixed.ts"
+import { os } from "@orpc/server";
+
+export const router = {
+  health: os.handler(() => "ok"),
+  users: usersRouter,
+};
+```
+
+## Next step
+
+Mount a router in [Hono guide](/effect-v4/guides/hono) when you are ready for HTTP integration.

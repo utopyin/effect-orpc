@@ -1,0 +1,55 @@
+---
+title: "ORPCTaggedError"
+description: "Factory for yieldable Effect errors that convert to oRPC errors."
+icon: "triangle-alert"
+---
+
+`ORPCTaggedError` creates Effect-native tagged error classes for oRPC procedures.
+
+```ts title="import.ts"
+import { ORPCTaggedError } from "effect-orpc";
+```
+
+## Basic error
+
+```ts title="basic.ts"
+class UserNotFoundError extends ORPCTaggedError("UserNotFoundError") {}
+```
+
+The default code is the tag converted to constant case: `USER_NOT_FOUND_ERROR`.
+
+## Error with options
+
+```ts title="with-options.ts"
+class ValidationError extends ORPCTaggedError("ValidationError", {
+  code: "BAD_REQUEST",
+  status: 400,
+  message: "Validation failed",
+}) {}
+```
+
+## Error with typed data
+
+```ts title="with-data.ts"
+class UserNotFoundError extends ORPCTaggedError("UserNotFoundError", {
+  code: "NOT_FOUND",
+  status: 404,
+  schema: z.object({ id: z.string() }),
+}) {}
+
+return yield * new UserNotFoundError({ data: { id: "1" } });
+```
+
+## Helpers
+
+| Export                                 | Purpose                                           |
+| -------------------------------------- | ------------------------------------------------- |
+| `isORPCTaggedError(value)`             | Check an error instance.                          |
+| `isORPCTaggedErrorClass(value)`        | Check an error class.                             |
+| `toORPCError(error)`                   | Convert to an `ORPCError`.                        |
+| `effectErrorMapToErrorMap(map)`        | Convert an Effect error map to an oRPC error map. |
+| `createEffectErrorConstructorMap(map)` | Build constructors for handler `errors`.          |
+
+## See also
+
+- [Typed errors](/capabilities/typed-errors)

@@ -1,0 +1,174 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "mint",
+  "name": "effect-orpc",
+  "description": "Effect-native procedures, services, errors, and tracing for oRPC.",
+  "colors": {
+    "primary": "#8B5CF6",
+    "light": "#A78BFA",
+    "dark": "#7C3AED"
+  },
+  "navbar": {
+    "links": [
+      {
+        "label": "",
+        "icon": {
+          "name": "github",
+          "style": "brands"
+        },
+        "href": "https://github.com/utopyin/effect-orpc"
+      },
+      {
+        "label": "",
+        "icon": {
+          "name": "npm",
+          "style": "brands"
+        },
+        "href": "https://www.npmjs.com/package/effect-orpc"
+      }
+    ]
+  },
+  "navigation": {
+    "global": {
+      "anchors": [
+        {
+          "anchor": "Repository",
+          "icon": "github",
+          "href": "https://github.com/utopyin/effect-orpc"
+        }
+      ]
+    },
+    "versions": [
+      {
+        "version": "Effect V3",
+        "default": true,
+        "groups": [
+          {
+            "group": "Getting started",
+            "pages": [
+              "index",
+              "getting-started/installation",
+              "getting-started/quickstart",
+              "getting-started/mental-model"
+            ]
+          },
+          {
+            "group": "Capabilities",
+            "pages": [
+              "capabilities/effect-procedures",
+              "capabilities/input-output-schemas",
+              "capabilities/service-injection",
+              "capabilities/request-scoped-services",
+              "capabilities/typed-errors",
+              "capabilities/middleware",
+              "capabilities/contract-first",
+              "capabilities/runtime-management",
+              "capabilities/tracing",
+              "capabilities/openapi-metadata",
+              "capabilities/callable-actionable",
+              "capabilities/router-composition"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/hono",
+              "guides/node-fiber-context",
+              "guides/opentelemetry",
+              "guides/testing",
+              "examples/minimal-router",
+              "examples/auth-current-user",
+              "examples/tagged-errors",
+              "examples/hono-request-context"
+            ]
+          },
+          {
+            "group": "Reference",
+            "pages": [
+              "reference/eos",
+              "reference/make-effect-orpc",
+              "reference/effect-builder",
+              "reference/orpc-tagged-error",
+              "reference/eoc",
+              "reference/implement-effect",
+              "reference/node"
+            ]
+          },
+          {
+            "group": "Help",
+            "pages": ["troubleshooting"]
+          }
+        ]
+      },
+      {
+        "version": "Effect V4",
+        "tag": "Beta",
+        "groups": [
+          {
+            "group": "Getting started",
+            "pages": [
+              "effect-v4/index",
+              "effect-v4/getting-started/installation",
+              "effect-v4/getting-started/quickstart",
+              "effect-v4/getting-started/mental-model"
+            ]
+          },
+          {
+            "group": "Capabilities",
+            "pages": [
+              "effect-v4/capabilities/effect-procedures",
+              "effect-v4/capabilities/input-output-schemas",
+              "effect-v4/capabilities/service-injection",
+              "effect-v4/capabilities/request-scoped-services",
+              "effect-v4/capabilities/typed-errors",
+              "effect-v4/capabilities/middleware",
+              "effect-v4/capabilities/contract-first",
+              "effect-v4/capabilities/runtime-management",
+              "effect-v4/capabilities/tracing",
+              "effect-v4/capabilities/openapi-metadata",
+              "effect-v4/capabilities/callable-actionable",
+              "effect-v4/capabilities/router-composition"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "effect-v4/guides/hono",
+              "effect-v4/guides/node-fiber-context",
+              "effect-v4/guides/opentelemetry",
+              "effect-v4/guides/testing",
+              "effect-v4/examples/minimal-router",
+              "effect-v4/examples/auth-current-user",
+              "effect-v4/examples/tagged-errors",
+              "effect-v4/examples/hono-request-context"
+            ]
+          },
+          {
+            "group": "Reference",
+            "pages": [
+              "effect-v4/reference/eos",
+              "effect-v4/reference/make-effect-orpc",
+              "effect-v4/reference/effect-builder",
+              "effect-v4/reference/orpc-tagged-error",
+              "effect-v4/reference/eoc",
+              "effect-v4/reference/implement-effect",
+              "effect-v4/reference/node"
+            ]
+          },
+          {
+            "group": "Help",
+            "pages": ["effect-v4/troubleshooting"]
+          }
+        ]
+      }
+    ]
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/utopyin/effect-orpc"
+    }
+  },
+  "metadata": {
+    "timestamp": true
+  }
+}

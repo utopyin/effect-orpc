@@ -1,0 +1,73 @@
+---
+title: "Introduction"
+description: "Effect-native procedures, services, typed errors, and tracing for oRPC."
+icon: "sparkles"
+---
+
+`effect-orpc` connects [oRPC](https://orpc.dev/) and [Effect](https://effect.website/) without making either side feel foreign.
+
+<Note>
+  This version covers the `effect-orpc@effect-v4` prerelease line for Effect 4.
+</Note>
+
+Use it when you want to keep oRPC's router, contract, middleware, client, and OpenAPI ecosystem while writing procedure implementations as Effects with compile-time safety for services and errors.
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/effect-v4/getting-started/quickstart">
+    Build a oRPC router with an Effect service, a typed input, and an Effect-native error.
+  </Card>
+
+  <Card title="Mental model" icon="brain" href="/effect-v4/getting-started/mental-model">
+    Understand builders, runtimes, services, handlers, and error boundaries.\
+  </Card>
+</CardGroup>
+
+## What it adds to oRPC
+
+`effect-orpc` extends the normal oRPC builder experience with Effect-aware capabilities:
+
+- Effect generator and Effect-returning handlers with `.effect(...)`
+- Type-safe Effect service requirements from `.provide(...)`
+- Request-scoped service providers from request context and input
+- Effect-native middleware that can yield services or return Effects
+- Tagged Effect errors that become oRPC errors
+- Automatic Effect spans around procedure execution
+
+## What it adds to Effect
+
+`effect-orpc` gives Effect applications a typed RPC surface:
+
+- oRPC routers and nested procedure trees
+- oRPC contracts through `eoc` and `implementEffect`
+- Schema-driven input and output validation
+- Typed client-visible errors
+- HTTP route and OpenAPI metadata
+- Compatibility with standard oRPC procedures in the same router
+
+<Note>
+  These docs assume you already know Effect basics. If you're new to Effect,
+  checkout the wonderful [effect.solutions](http://effect.solutions) for a quick
+  start.
+</Note>
+
+## First path through the docs
+
+<Steps>
+  <Step title="Install the package">
+    Start with the peer dependencies and basic imports in
+    [Installation](/effect-v4/getting-started/installation).
+  </Step>
+  <Step title="Build one router">
+    Follow [Quickstart](/effect-v4/getting-started/quickstart) to create one
+    Effect procedure.
+  </Step>
+  <Step title="Deepen by capability">
+    Move through [Effect procedures](/effect-v4/capabilities/effect-procedures),
+    [service injection](/effect-v4/capabilities/service-injection), and [typed
+    errors](/effect-v4/capabilities/typed-errors).
+  </Step>
+  <Step title="Add guides when needed">
+    Use [Guides](/effect-v4/guides/hono) for Hono, Node bridge, OpenTelemetry,
+    testing, and examples.
+  </Step>
+</Steps>

@@ -1,0 +1,64 @@
+---
+title: "Tracing"
+description: "Use automatic Effect spans and custom span names for procedures."
+icon: "analytics"
+---
+
+Effect procedures are wrapped in Effect spans automatically.
+
+By default, the span name comes from the procedure path in the router.
+
+```ts title="automatic-spans.ts"
+export const router = {
+  users: {
+    // span name: "users.get"
+    get: effectProcedure.effect(function* () {
+      return yield* UsersRepo.findById("1");
+    }),
+  },
+};
+```
+
+## Override the span name
+
+Use `.traced(...)` when a stable custom span name is better than the router path.
+
+```ts title="custom-span.ts"
+const getUser = effectProcedure
+  .input(z.object({ id: z.string() }))
+  .traced("users.get_by_id")
+  .effect(function* ({ input }) {
+    return yield* UsersRepo.findById(input.id);
+  });
+```
+
+## User spans inside procedure spans
+
+Effect-returning callbacks keep their own spans inside the automatic procedure span. This is useful when you use named `Effect.fn(...)` helpers or `Effect.withSpan(...)` inside handlers, providers, or middleware.
+
+```ts title="named-effect-fn.ts"
+const getUser = effectProcedure.effect(
+  Effect.fn("users.repo.lookup")(function* ({ input }) {
+    return yield* UsersRepo.findById(input.id);
+  }),
+);
+```
+
+## Error stack traces
+
+When an Effect procedure fails, `effect-orpc` captures stack information near the procedure definition site so spans point to useful application code.
+
+```txt title="example-stack.txt"
+UserNotFoundError: User not found
+    at <anonymous> (/app/src/router.ts:42:28)
+    at users.get (/app/src/router.ts:40:35)
+```
+
+<Note>
+  This page covers the tracing capability. To wire spans to an OpenTelemetry
+  exporter, see [OpenTelemetry guide](/guides/opentelemetry).
+</Note>
+
+## Next step
+
+Add HTTP/OpenAPI metadata with [OpenAPI metadata](/capabilities/openapi-metadata).

@@ -1,0 +1,122 @@
+---
+title: "Quickstart"
+description: "Build a Effect-aware oRPC router."
+icon: "rocket"
+---
+
+## Define a service and error
+
+```ts title="users.ts"
+import { Context, Effect, Layer } from "effect";
+import { ORPCTaggedError } from "effect-orpc";
+import * as z from "zod";
+
+export const User = z.object({
+  id: z.string(),
+  name: z.string(),
+});
+
+const users: Array<z.infer<typeof User>> = [
+  { id: "1", name: "Ada Lovelace" },
+  { id: "2", name: "Grace Hopper" },
+];
+
+export class UsersRepo extends Context.Service<
+  UsersRepo,
+  {
+    readonly findById: (
+      id: string,
+    ) => Effect.Effect<z.infer<typeof User> | undefined>;
+  }
+>()("UsersRepo") {}
+
+export const UsersRepoLive = Layer.succeed(UsersRepo, {
+  findById: (id) => Effect.succeed(users.find((user) => user.id === id)),
+});
+
+export class UserNotFoundError extends ORPCTaggedError("UserNotFoundError", {
+  status: 404,
+  message: "User not found",
+  schema: z.object({ id: z.string() }),
+}) {}
+```
+
+## Create the router
+
+```ts title="router.ts"
+import { os } from "@orpc/server";
+import { eos } from "effect-orpc";
+import * as z from "zod";
+
+import { User, UserNotFoundError, UsersRepo, UsersRepoLive } from "./users";
+
+const effectProcedure = eos
+  .provide(UsersRepoLive)
+  .errors({ UserNotFoundError });
+
+export const router = {
+  health: os.handler(() => "ok"),
+
+  users: {
+    get: effectProcedure
+      .input(z.object({ id: z.string() }))
+      .output(User)
+      .effect(function* ({ input }) {
+        const usersRepo = yield* UsersRepo;
+        const user = yield* usersRepo.findById(input.id);
+
+        if (!user) {
+          return yield* new UserNotFoundError({
+            data: { id: input.id },
+          });
+        }
+
+        return user;
+      }),
+  },
+};
+
+export type Router = typeof router;
+```
+
+## Call it!
+
+Use `.callable()` when you want to invoke a procedure directly in tests, scripts, or local examples.
+
+```ts title="main.ts"
+import { router } from "./router";
+
+const getUser = router.users.get.callable();
+
+console.log(await getUser({ id: "1" }));
+// { id: "1", name: "Ada Lovelace" }
+```
+
+## What happened
+
+<Steps>
+  <Step title="`eos` wrapped an oRPC builder">
+    `eos` exposes familiar oRPC builder methods and adds Effect-aware methods
+    such as `.provide(...)`, `.effect(...)`, and `.traced(...)`.
+  </Step>
+  <Step title="The service layer satisfied Effect requirements">
+    `UsersRepoLive` was provided before the handler, so `yield* UsersRepo` is
+    available at compile-time.
+  </Step>
+  <Step title="The tagged error became an oRPC error">
+    `UserNotFoundError` is yieldable in Effect code and serializable as an oRPC
+    error.
+  </Step>
+</Steps>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Mental model" icon="brain" href="/effect-v4/getting-started/mental-model">
+    Learn how builders, layers, runtimes, and request boundaries fit together.
+  </Card>
+
+  <Card title="Effect procedures" icon="function" href="/effect-v4/capabilities/effect-procedures">
+    Focus on `.effect(...)` handlers and their typed handler options.
+  </Card>
+</CardGroup>

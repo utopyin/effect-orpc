@@ -1,0 +1,65 @@
+---
+title: "Runtime management"
+description: "Choose between providing a Layer directly and using a caller-owned ManagedRuntime."
+icon: "box-arrow-down-arrow-up"
+---
+
+You can create Effect-aware builders from either a `Layer` or a `ManagedRuntime`.
+
+## Simple path: provide a layer
+
+Use `eos.provide(AppLive)` when per-call acquisition is acceptable and you do not need to own runtime shutdown. You can also pass the layer directly with `makeEffectORPC(AppLive)`.
+
+```ts title="layer.ts"
+const AppLive = Layer.mergeAll(UsersRepoLive, CacheLive);
+
+export const effectProcedure = eos.provide(AppLive);
+```
+
+## Long-lived resources: own the runtime
+
+Use `makeEffectORPC(runtime)` when scoped resources should be acquired once and released on application shutdown.
+
+```ts title="runtime.ts"
+import { ManagedRuntime } from "effect";
+import { makeEffectORPC } from "effect-orpc";
+
+const runtime = ManagedRuntime.make(AppLive);
+
+export const effectProcedure = makeEffectORPC(runtime);
+
+process.on("SIGTERM", async () => {
+  await runtime.dispose();
+  process.exit(0);
+});
+```
+
+Good candidates for a caller-owned runtime:
+
+- database pools
+- telemetry SDKs
+- HTTP clients with connection pools
+- caches
+- long-lived scoped resources
+
+## Wrap an existing oRPC builder
+
+If your application already has an oRPC builder, wrap it:
+
+```ts title="wrap-builder.ts"
+const authedOs = os.$context<{ userId: string }>();
+
+const effectAuthedOs = makeEffectORPC(authedOs).provide(AppLive);
+```
+
+## Rule of thumb
+
+| Need                                           | Use                                                 |
+| ---------------------------------------------- | --------------------------------------------------- |
+| Small app, examples, simple services           | `eos.provide(AppLive)` or `makeEffectORPC(AppLive)` |
+| Shared scoped resources with explicit shutdown | `makeEffectORPC(ManagedRuntime.make(AppLive))`      |
+| Existing oRPC builder                          | `makeEffectORPC(existingBuilder).provide(AppLive)`  |
+
+## Next step
+
+Customize spans with [Tracing](/effect-v4/capabilities/tracing).

@@ -1,0 +1,51 @@
+---
+title: "eos"
+description: "The default Effect-aware oRPC builder."
+icon: "box"
+---
+
+`eos` is the default Effect-aware procedure builder exported from `effect-orpc`.
+
+```ts title="import.ts"
+import { eos } from "effect-orpc";
+```
+
+## Basic use
+
+```ts title="basic.ts"
+const effectProcedure = eos.provide(AppLive);
+
+const procedure = effectProcedure.effect(function* () {
+  const usersRepo = yield* UsersRepo;
+  return yield* usersRepo.list();
+});
+```
+
+`eos` starts without an application layer. Most apps call `.provide(AppLive)` once and reuse the returned builder.
+
+Effect-native callbacks on the builder can be generator functions or functions that return an `Effect`.
+
+## Common methods
+
+| Method                      | Purpose                                                |
+| --------------------------- | ------------------------------------------------------ |
+| `.$context<T>()`            | Set the initial oRPC context type.                     |
+| `.provide(layer)`           | Provide a base Effect layer.                           |
+| `.provide(tag, fn)`         | Provide a request-scoped service.                      |
+| `.provideOptional(tag, fn)` | Optionally provide a request-scoped service.           |
+| `.errors(map)`              | Add oRPC and tagged Effect errors.                     |
+| `.input(schema)`            | Define input validation.                               |
+| `.output(schema)`           | Define output validation.                              |
+| `.use(middleware)`          | Add native, generator, or Effect-returning middleware. |
+| `.traced(name)`             | Override the Effect span name.                         |
+| `.handler(fn)`              | Define a standard oRPC handler.                        |
+| `.effect(fn)`               | Define an Effect handler.                              |
+| `.prefix(prefix)`           | Prefix routes in a router.                             |
+| `.tag(...tags)`             | Tag routes for OpenAPI.                                |
+| `.router(router)`           | Apply options to a router.                             |
+| `.lazy(loader)`             | Apply options to a lazy router.                        |
+
+## See also
+
+- [`makeEffectORPC`](/effect-v4/reference/make-effect-orpc)
+- [`EffectBuilder`](/effect-v4/reference/effect-builder)

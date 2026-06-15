@@ -1,0 +1,43 @@
+---
+title: "Auth and current user"
+description: "Provide a CurrentUser service from request context."
+icon: "user-check"
+---
+
+This example turns oRPC context into an Effect service.
+
+```ts title="auth.ts"
+import { Context, Effect } from "effect";
+import { eos } from "effect-orpc";
+
+class CurrentUser extends Context.Tag("CurrentUser")<
+  CurrentUser,
+  { id: string; role: "admin" | "member" }
+>() {}
+
+const authedProcedure = eos
+  .$context<{ user: { id: string; role: "admin" | "member" } }>()
+  .provide(CurrentUser, ({ context }) => Effect.succeed(context.user));
+
+export const router = {
+  me: authedProcedure.effect(function* () {
+    return yield* CurrentUser;
+  }),
+};
+```
+
+## Use in middleware
+
+```ts title="require-admin.ts"
+const adminProcedure = authedProcedure.use(function* () {
+  const user = yield* CurrentUser;
+
+  if (user.role !== "admin") {
+    return yield* Effect.fail(new ForbiddenError());
+  }
+});
+```
+
+## Next step
+
+Add structured errors with [Tagged errors example](/examples/tagged-errors).

@@ -1,0 +1,60 @@
+---
+title: "Service injection"
+description: "Provide Effect layers to procedures and preserve service requirement type safety."
+icon: "plug"
+---
+
+Use `.provide(layer)` to make Effect services available to downstream procedures.
+
+```ts title="services.ts"
+import { Effect } from "effect";
+
+export class UsersRepo extends Effect.Service<UsersRepo>()("UsersRepo", {
+  accessors: true,
+  sync: () => ({
+    findById: (id: string) => ({ id, name: "Ada Lovelace" }),
+  }),
+}) {}
+```
+
+```ts title="procedure.ts"
+import { eos } from "effect-orpc";
+
+const effectProcedure = eos.provide(UsersRepo.Default);
+
+const getUser = effectProcedure.effect(function* () {
+  return yield* UsersRepo.findById("1");
+});
+```
+
+## Missing services are type errors
+
+If a handler yields a service that was not provided, the procedure should fail to type-check.
+
+```ts title="missing-service.ts"
+class MissingRepo extends Context.Tag("MissingRepo")<
+  MissingRepo,
+  { find: () => Effect.Effect<string> }
+>() {}
+
+const procedure = eos.provide(UsersRepo.Default).effect(
+  // @ts-expect-error MissingRepo was not provided.
+  function* () {
+    return yield* MissingRepo;
+  },
+);
+```
+
+## Provide multiple services
+
+Merge services into one application layer, then provide that layer once.
+
+```ts title="app-layer.ts"
+const AppLive = Layer.mergeAll(UsersRepo.Default, Logger.pretty, Cache.Default);
+
+const effectProcedure = eos.provide(AppLive);
+```
+
+## Next step
+
+Use request data to provide per-request services in [Request-scoped services](/capabilities/request-scoped-services).

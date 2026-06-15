@@ -1,0 +1,46 @@
+---
+title: "Minimal router"
+description: "A small router with one Effect procedure."
+icon: "file-code"
+---
+
+This example is the smallest useful `effect-orpc` router.
+
+```ts title="router.ts"
+import { Effect } from "effect";
+import { eos } from "effect-orpc";
+import * as z from "zod";
+
+class Greeter extends Effect.Service<Greeter>()("Greeter", {
+  accessors: true,
+  sync: () => ({
+    greet: (name: string) => `Hello, ${name}!`,
+  }),
+}) {}
+
+const procedure = eos.provide(Greeter.Default);
+
+export const router = {
+  greet: procedure
+    .input(z.object({ name: z.string() }))
+    .output(z.string())
+    .effect(function* ({ input }) {
+      return yield* Greeter.greet(input.name);
+    }),
+};
+
+const greet = router.greet.callable();
+console.log(await greet({ name: "Ada" }));
+```
+
+## What to copy
+
+Copy this shape when you need:
+
+- one base Effect layer
+- one reusable procedure builder
+- direct invocation
+
+## Next step
+
+Add auth with [Auth and current user](/examples/auth-current-user).

@@ -1,0 +1,112 @@
+---
+title: "Middleware"
+description: "Use native oRPC middleware, Effect generators, and Effect-returning middleware together."
+icon: "code-commit"
+---
+
+`.use(...)` accepts native oRPC middleware, Effect generator middleware, and middleware callbacks that return an `Effect`.
+
+Use Effect middleware when the middleware needs Effect services, Effect errors, or Effect control flow.
+
+## Gate middleware
+
+A gate runs checks and lets the pipeline continue automatically.
+
+```ts title="gate.ts"
+const authedProcedure = effectProcedure.use(function* () {
+  const user = yield* CurrentUser;
+  yield* requireActiveUser(user);
+});
+```
+
+## Wrap middleware
+
+A wrap calls `next(...)` explicitly and returns its result.
+
+```ts title="wrap.ts"
+const authedProcedure = effectProcedure.use(function* ({ next }) {
+  const user = yield* CurrentUser;
+  yield* requireActiveUser(user);
+
+  return yield* next({
+    context: { userId: user.id },
+  });
+});
+```
+
+## Transform output
+
+```ts title="output-transform.ts"
+const wrapped = effectProcedure.use(function* ({ next }, _input, output) {
+  const result = yield* next();
+  return yield* output({
+    ...result.output,
+    wrapped: true,
+  });
+});
+```
+
+## Effect-returning middleware
+
+Effect-returning middleware can use `Effect.fn(...)` or return `Effect.gen(...)` directly.
+
+```ts title="effect-returning.ts"
+const authedProcedure = effectProcedure.use(
+  Effect.fn("middleware.auth")(function* ({ next }) {
+    const user = yield* CurrentUser;
+    yield* requireActiveUser(user);
+
+    return yield* next({ context: { userId: user.id } });
+  }),
+);
+
+const auditedProcedure = effectProcedure.use(({ next }) =>
+  Effect.gen(function* () {
+    yield* Effect.logDebug("continuing through audit middleware");
+    return yield* next();
+  }),
+);
+```
+
+Guard-only Effect middleware can return `void`; the pipeline continues automatically.
+
+## Reusable Effect middleware
+
+Use `.middleware(...)` to define Effect middleware once and pass it to `.use(...)`.
+
+```ts title="reusable.ts"
+const requireAdmin = effectProcedure.middleware(function* ({ next }) {
+  const user = yield* CurrentUser;
+  yield* requireAdminUser(user);
+  return yield* next();
+});
+
+const adminProcedure = effectProcedure.use(requireAdmin);
+```
+
+## Native oRPC middleware still works
+
+```ts title="native.ts"
+const withRequestLabel = effectProcedure.use(({ context, next }) =>
+  next({
+    context: {
+      requestLabel: `${context.role}:${context.requestId}`,
+    },
+  }),
+);
+
+const checked = effectProcedure.use(({ context }) => {
+  if (!context.requestId) throw new Error("missing request id");
+  // Returning void is a native guard: the pipeline continues automatically.
+});
+```
+
+<Note>
+  Native middleware can split contiguous Effect runtime boundaries. If you need
+  request-local `FiberRef` continuity across those boundaries in Node, see [Node
+  fiber context bridge](/guides/node-fiber-context).
+</Note>
+
+## Next step
+
+Use contracts with [Contract-first APIs](/capabilities/contract-first).

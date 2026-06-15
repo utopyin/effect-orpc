@@ -1,0 +1,74 @@
+---
+title: "Typed errors"
+description: "Create Effect-native errors that map to typed oRPC errors."
+icon: "warning"
+---
+
+`ORPCTaggedError` creates errors that are both:
+
+- yieldable in Effect code
+- serializable as oRPC errors
+
+## Define a tagged error
+
+```ts title="errors.ts"
+import { ORPCTaggedError } from "effect-orpc";
+import * as z from "zod";
+
+export class UserNotFoundError extends ORPCTaggedError("UserNotFoundError", {
+  code: "NOT_FOUND",
+  status: 404,
+  message: "User not found",
+  schema: z.object({ id: z.string() }),
+}) {}
+```
+
+## Register it on the builder
+
+```ts title="procedure.ts"
+const effectProcedure = eos.errors({ UserNotFoundError });
+```
+
+## Yield it in a handler
+
+```ts title="get-user.ts"
+const getUser = effectProcedure
+  .input(z.object({ id: z.string() }))
+  .effect(function* ({ input }) {
+    const user = yield* UsersRepo.findById(input.id);
+
+    if (!user) {
+      return yield* new UserNotFoundError({ data: { id: input.id } });
+    }
+
+    return user;
+  });
+```
+
+## Mix regular oRPC errors and tagged errors
+
+```ts title="mixed-errors.ts"
+const procedure = eos.errors({
+  UNAUTHORIZED: { status: 401, message: "Login required" },
+  UserNotFoundError,
+});
+
+const getUser = procedure.effect(function* ({ errors }) {
+  const user = yield* CurrentUser;
+
+  if (!user) {
+    return yield* Effect.fail(errors.UNAUTHORIZED());
+  }
+
+  return user;
+});
+```
+
+<Tip>
+  Pass tagged error classes to `.errors(...)` so the procedure surface knows
+  about the client-visible error type.
+</Tip>
+
+## Next step
+
+Add shared behavior with [Middleware](/capabilities/middleware).

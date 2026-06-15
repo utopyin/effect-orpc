@@ -398,17 +398,15 @@ Use `withFiberContext` when request-local `FiberRef` state is created outside th
 ```ts
 import { Hono } from "hono";
 import { Effect } from "effect";
-import { eos } from "effect-orpc";
 import { withFiberContext } from "effect-orpc/node";
 
-const effectProcedure = eos.provide(AppLive);
 const app = new Hono();
 
 app.use("*", async (c, next) => {
   await Effect.runPromise(
     Effect.gen(function* () {
       yield* Effect.annotateLogsScoped({
-        requestId: c.get("requestId"),
+        requestId: c.req.header("x-request-id") ?? crypto.randomUUID(),
       });
 
       yield* withFiberContext(() => next());

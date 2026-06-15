@@ -1,0 +1,70 @@
+---
+title: "Contract-first APIs"
+description: "Implement oRPC contracts with Effect-native handlers."
+icon: "file-signature"
+---
+
+Use `eoc` and `implementEffect(...)` when you already have an oRPC contract or want contract-first enforcement.
+
+## Define the contract
+
+```ts title="contract.ts"
+import { eoc, ORPCTaggedError } from "effect-orpc";
+import * as z from "zod";
+
+class UserNotFoundError extends ORPCTaggedError("UserNotFoundError", {
+  code: "NOT_FOUND",
+  status: 404,
+  schema: z.object({ id: z.string() }),
+}) {}
+
+export const contract = {
+  users: {
+    get: eoc
+      .errors({ UserNotFoundError })
+      .input(z.object({ id: z.string() }))
+      .output(z.object({ id: z.string(), name: z.string() })),
+  },
+};
+```
+
+## Implement with Effect
+
+```ts title="router.ts"
+import { implementEffect } from "effect-orpc";
+
+const oe = implementEffect(contract, UsersRepoLive);
+
+export const router = oe.router({
+  users: {
+    get: oe.users.get.effect(function* ({ input }) {
+      const usersRepo = yield* UsersRepo;
+      const user = yield* usersRepo.findById(input.id);
+      if (!user)
+        return yield* new UserNotFoundError({ data: { id: input.id } });
+      return user;
+    }),
+  },
+});
+```
+
+## What contract leaves expose
+
+Contract leaves preserve the contract-defined input, output, and error surface. They add `.effect(...)` alongside implementer methods such as `.handler(...)` and `.use(...)`.
+
+They do not expose contract-changing methods such as `.input(...)` or `.output(...)` because those belong in the contract definition.
+
+## When to use this path
+
+Use contract-first when:
+
+- multiple teams depend on a stable API contract
+- you generate clients from contracts
+- you want API shape changes isolated from implementation code
+- you want tagged Effect errors declared at contract definition time
+
+Use direct `eos` builders when you want the shortest path to implementing procedures.
+
+## Next step
+
+Read the [`implementEffect` reference](/effect-v4/reference/implement-effect).

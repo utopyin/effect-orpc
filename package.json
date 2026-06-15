@@ -1,11 +1,13 @@
 {
-  "name": "effect-orpc-workspace",
+  "name": "@effect-orpc/workspace",
   "private": true,
   "workspaces": [
     "packages/*",
-    "examples/*"
+    "examples/*",
+    "apps/*"
   ],
   "scripts": {
+    "dev": "turbo run dev",
     "build": "turbo run build",
     "build:watch": "turbo run build:watch --parallel",
     "type:check": "turbo run type:check",

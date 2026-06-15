@@ -1,0 +1,65 @@
+---
+title: "OpenAPI metadata"
+description: "Attach route, prefix, and tag metadata to Effect procedures."
+icon: "square-terminal"
+---
+
+`effect-orpc` preserves oRPC route metadata methods.
+
+Use them when your router is served by an oRPC OpenAPI handler or when you generate OpenAPI documentation from your oRPC router.
+
+## Route a procedure
+
+```ts title="route.ts"
+const listUsers = effectProcedure
+  .route({ method: "GET", path: "/users" })
+  .output(z.array(User))
+  .effect(function* () {
+    const usersRepo = yield* UsersRepo;
+    return yield* usersRepo.list();
+  });
+```
+
+## Prefix a router
+
+```ts title="prefix.ts"
+const usersRouter = effectProcedure.prefix("/api").router({
+  list: effectProcedure
+    .route({ method: "GET", path: "/users" })
+    .effect(function* () {
+      const usersRepo = yield* UsersRepo;
+      return yield* usersRepo.list();
+    }),
+});
+```
+
+The final route path is `/api/users`.
+
+## Tag procedures
+
+```ts title="tag.ts"
+const usersRouter = effectProcedure.tag("Users").router({
+  list: effectProcedure
+    .route({ method: "GET", path: "/users" })
+    .effect(function* () {
+      const usersRepo = yield* UsersRepo;
+      return yield* usersRepo.list();
+    }),
+});
+```
+
+## Contract-first metadata
+
+Contract-first APIs can also use route metadata in the contract definition.
+
+```ts title="contract-route.ts"
+const contract = {
+  users: {
+    list: eoc.route({ method: "GET", path: "/users" }).output(z.array(User)),
+  },
+};
+```
+
+## Next step
+
+Expose procedures directly with [Callable and actionable procedures](/effect-v4/capabilities/callable-actionable).

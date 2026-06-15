@@ -1,0 +1,91 @@
+---
+title: "Effect procedures"
+description: "Write oRPC handlers as Effect generators or Effect-returning functions."
+icon: "function"
+---
+
+Use `.effect(...)` when a procedure implementation should run as an Effect.
+
+Handlers can be generator callbacks, `Effect.fn(...)` callbacks, or functions that return an `Effect`.
+
+```ts title="effect-procedure.ts"
+const getUser = effectProcedure
+  .input(z.object({ id: z.string() }))
+  .effect(function* ({ input }) {
+    const usersRepo = yield* UsersRepo;
+    const user = yield* usersRepo.findById(input.id);
+    return user;
+  });
+```
+
+The handler receives the normal oRPC handler options, including `input`, `context`, `errors`, `path`, `signal`, and metadata.
+
+## Handler shape
+
+```ts title="handler-options.ts"
+const procedure = effectProcedure.effect(function* ({
+  input,
+  context,
+  errors,
+  path,
+  signal,
+}) {
+  yield* Effect.logDebug("handling procedure", { path });
+
+  if (signal?.aborted) {
+    yield* Effect.logDebug("request was already aborted");
+  }
+
+  return { input, context, path, errorKeys: Object.keys(errors) };
+});
+```
+
+## Effect-returning handlers
+
+Use a plain Effect-returning callback when you already have an `Effect` value, or when you want to keep a named `Effect.fn(...)` span inside the automatic procedure span.
+
+```ts title="effect-returning.ts"
+const getUser = effectProcedure.effect(
+  Effect.fn("users.get")(function* ({ input }) {
+    const usersRepo = yield* UsersRepo;
+    return yield* usersRepo.findById(input.id);
+  }),
+);
+
+const listUsers = effectProcedure.effect(() =>
+  Effect.gen(function* () {
+    const usersRepo = yield* UsersRepo;
+    return yield* usersRepo.list();
+  }),
+);
+```
+
+## Mix with standard oRPC handlers
+
+You can put standard oRPC procedures and Effect procedures in the same router.
+
+```ts title="mixed-router.ts"
+import { os } from "@orpc/server";
+
+export const router = {
+  health: os.handler(() => "ok"),
+
+  users: {
+    get: effectProcedure.effect(function* ({ input }) {
+      const usersRepo = yield* UsersRepo;
+      return yield* usersRepo.findById(input.id);
+    }),
+  },
+};
+```
+
+<Tip>
+  Use `.handler(...)` for plain synchronous or async procedures. Use
+  `.effect(...)` when the handler needs Effect services, typed Effect failures,
+  tracing, or Effect context.
+</Tip>
+
+## Next steps
+
+- Add schemas with [Input and output schemas](/effect-v4/capabilities/input-output-schemas).
+- Add services with [Service injection](/effect-v4/capabilities/service-injection).

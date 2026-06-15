@@ -1,0 +1,59 @@
+---
+title: "Testing"
+description: "Test Effect procedures directly without starting an HTTP server."
+icon: "flask"
+---
+
+The simplest tests call procedures directly with `.callable()`.
+
+## Test a callable procedure
+
+```ts title="users.test.ts"
+import { describe, expect, it } from "vitest";
+
+import { router } from "./router";
+
+describe("users.get", () => {
+  it("returns a user", async () => {
+    const getUser = router.users.get.callable();
+
+    await expect(getUser({ id: "1" })).resolves.toEqual({
+      id: "1",
+      name: "Ada Lovelace",
+    });
+  });
+});
+```
+
+## Test request context
+
+If the procedure requires context, pass callable options according to your oRPC setup.
+
+```ts title="context.test.ts"
+const me = router.users.me.callable({
+  context: {
+    user: { id: "u_123", role: "member" },
+  },
+});
+
+await expect(me()).resolves.toEqual({ id: "u_123", role: "member" });
+```
+
+## Test Effect errors
+
+```ts title="errors.test.ts"
+const getUser = router.users.get.callable();
+
+await expect(getUser({ id: "missing" })).rejects.toMatchObject({
+  code: "USER_NOT_FOUND_ERROR",
+  status: 404,
+});
+```
+
+## Test through HTTP only when needed
+
+Use direct procedure tests for business logic. Add HTTP tests when you need to verify framework mounting, headers, CORS, serialization, or OpenAPI routes.
+
+## Repository examples
+
+The package test suite in `packages/effect-orpc/src/tests` is a good source of low-level examples for builder behavior, contracts, tagged errors, and runtime boundaries.

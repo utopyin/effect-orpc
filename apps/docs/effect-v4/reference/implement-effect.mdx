@@ -1,0 +1,56 @@
+---
+title: "implementEffect"
+description: "Create an Effect-aware implementer for an oRPC contract."
+---
+
+`implementEffect(contract, layerOrRuntime)` creates an Effect-aware contract implementer.
+
+```ts title="import.ts"
+import { implementEffect } from "effect-orpc";
+```
+
+## Signature
+
+```ts title="signature.ts"
+const oe = implementEffect(contract, AppLive);
+// or
+const oe = implementEffect(contract, runtime);
+```
+
+## Implement a contract
+
+```ts title="router.ts"
+const oe = implementEffect(contract, UsersRepoLive);
+
+export const router = oe.router({
+  users: {
+    get: oe.users.get.effect(function* ({ input }) {
+      const usersRepo = yield* UsersRepo;
+      return yield* usersRepo.findById(input.id);
+    }),
+  },
+});
+```
+
+## Add context and middleware
+
+```ts title="context.ts"
+const oe = implementEffect(contract, runtime)
+  .$context<RequestContext>()
+  .use(({ context, next }) =>
+    next({ context: { requestLabel: `${context.role}:${context.requestId}` } }),
+  );
+```
+
+## Contract leaf methods
+
+| Method          | Purpose                                 |
+| --------------- | --------------------------------------- |
+| `.use(...)`     | Add middleware to this contract leaf.   |
+| `.handler(...)` | Implement with a standard oRPC handler. |
+| `.effect(...)`  | Implement with an Effect handler.       |
+
+## See also
+
+- [Contract-first APIs](/effect-v4/capabilities/contract-first)
+- [`eoc`](/effect-v4/reference/eoc)

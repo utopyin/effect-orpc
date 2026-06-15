@@ -135,18 +135,17 @@ export type EffectProcedureHandler<
     EffectErrorConstructorMap<TEffectErrorMap>,
     TMeta
   >,
-) => Generator<
-  YieldWrap<
-    Effect.Effect<
-      any,
-      | EffectErrorMapToUnion<TEffectErrorMap>
-      | ORPCError<ORPCErrorCode, unknown>,
+) =>
+  | Effect.Effect<
+      THandlerOutput,
+      EffectOperationError<TEffectErrorMap>,
       TRequirementsProvided
     >
-  >,
-  THandlerOutput,
-  never
->;
+  | EffectCallbackGenerator<
+      THandlerOutput,
+      TEffectErrorMap,
+      TRequirementsProvided
+    >;
 
 export interface EffectProcedureHandlerConfig {
   readonly effectFn: EffectProcedureHandler<any, any, any, any, any, any>;
@@ -156,6 +155,26 @@ export interface EffectProcedureHandlerConfig {
 
 type EffectTagService<T extends EffectContext.Tag<any, any>> =
   T extends EffectContext.Tag<any, infer S> ? S : never;
+
+type EffectOperationError<TEffectErrorMap extends EffectErrorMap> =
+  | EffectErrorMapToUnion<TEffectErrorMap>
+  | ORPCError<ORPCErrorCode, unknown>;
+
+type EffectCallbackGenerator<
+  TReturn,
+  TEffectErrorMap extends EffectErrorMap,
+  TRequirementsProvided,
+> = Generator<
+  YieldWrap<
+    Effect.Effect<
+      unknown,
+      EffectOperationError<TEffectErrorMap>,
+      TRequirementsProvided
+    >
+  >,
+  TReturn,
+  never
+>;
 
 export type EffectProvider<
   TCurrentContext extends Context,
@@ -171,11 +190,17 @@ export type EffectProvider<
     EffectErrorConstructorMap<TEffectErrorMap>,
     TMeta
   >,
-) => Effect.Effect<
-  EffectTagService<TTag>,
-  EffectErrorMapToUnion<TEffectErrorMap> | ORPCError<ORPCErrorCode, unknown>,
-  TRequirementsProvided
->;
+) =>
+  | Effect.Effect<
+      EffectTagService<TTag>,
+      EffectOperationError<TEffectErrorMap>,
+      TRequirementsProvided
+    >
+  | EffectCallbackGenerator<
+      EffectTagService<TTag>,
+      TEffectErrorMap,
+      TRequirementsProvided
+    >;
 
 export type EffectOptionalProvider<
   TCurrentContext extends Context,
@@ -191,11 +216,17 @@ export type EffectOptionalProvider<
     EffectErrorConstructorMap<TEffectErrorMap>,
     TMeta
   >,
-) => Effect.Effect<
-  Option.Option<EffectTagService<TTag>>,
-  EffectErrorMapToUnion<TEffectErrorMap> | ORPCError<ORPCErrorCode, unknown>,
-  TRequirementsProvided
->;
+) =>
+  | Effect.Effect<
+      Option.Option<EffectTagService<TTag>>,
+      EffectOperationError<TEffectErrorMap>,
+      TRequirementsProvided
+    >
+  | EffectCallbackGenerator<
+      Option.Option<EffectTagService<TTag>>,
+      TEffectErrorMap,
+      TRequirementsProvided
+    >;
 
 interface EffectMiddlewareNext<
   TOutput,
@@ -327,17 +358,16 @@ export type EffectOrORPCMiddleware<
 ) =>
   | MiddlewareResult<TOutContext, TOutput>
   | PromiseLike<MiddlewareResult<TOutContext, TOutput>>
-  | Generator<
-      YieldWrap<
-        Effect.Effect<
-          unknown,
-          | EffectErrorMapToUnion<TEffectErrorMap>
-          | ORPCError<ORPCErrorCode, unknown>,
-          TRequirementsProvided
-        >
-      >,
+  | void
+  | Effect.Effect<
       EffectMiddlewareResult<TOutContext, TOutput> | void,
-      never
+      EffectOperationError<TEffectErrorMap>,
+      TRequirementsProvided
+    >
+  | EffectCallbackGenerator<
+      EffectMiddlewareResult<TOutContext, TOutput> | void,
+      TEffectErrorMap,
+      TRequirementsProvided
     >;
 
 export type EffectMiddlewareOptions<
@@ -384,18 +414,18 @@ export type EffectMiddleware<
     TEffectErrorMap,
     TRequirementsProvided
   >,
-) => Generator<
-  YieldWrap<
-    Effect.Effect<
-      unknown,
-      | EffectErrorMapToUnion<TEffectErrorMap>
-      | ORPCError<ORPCErrorCode, unknown>,
+) =>
+  | Effect.Effect<
+      EffectMiddlewareResult<TOutContext, TOutput> | void,
+      EffectOperationError<TEffectErrorMap>,
       TRequirementsProvided
     >
-  >,
-  EffectMiddlewareResult<TOutContext, TOutput> | void,
-  never
->;
+  | EffectCallbackGenerator<
+      EffectMiddlewareResult<TOutContext, TOutput> | void,
+      TEffectErrorMap,
+      TRequirementsProvided
+    >
+  | void;
 
 type EffectProvideStep = {
   readonly _tag: "provide";

@@ -1,4 +1,4 @@
-import { Layer, ManagedRuntime } from "effect";
+import { Layer } from "effect";
 
 import { eoc } from "../index";
 import {
@@ -12,7 +12,7 @@ import {
 export type InitialContext = { db: string };
 export type CurrentContext = InitialContext & { auth: boolean };
 
-export const runtime = ManagedRuntime.make(Layer.empty);
+export const runtime = Layer.empty;
 
 export const typedContract = {
   ping: eoc

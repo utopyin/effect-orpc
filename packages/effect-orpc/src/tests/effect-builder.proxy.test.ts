@@ -1,12 +1,10 @@
 import { isLazy, isProcedure, os, unlazy } from "@orpc/server";
-import { Layer, ManagedRuntime } from "effect";
 import { describe, expect, it } from "vitest";
 import z from "zod";
 
-import { EffectBuilder, makeEffectORPC } from "../effect-builder";
+import { EffectBuilder, eos, makeEffectORPC } from "../effect-builder";
 import { EffectDecoratedProcedure } from "../effect-procedure";
 import { ORPCTaggedError } from "../tagged-error";
-const runtime = ManagedRuntime.make(Layer.empty);
 
 function makeCustomBuilder(meta: Record<string, unknown> = {}): {
   "~orpc": (typeof os)["~orpc"];
@@ -32,7 +30,7 @@ function makeCustomBuilder(meta: Record<string, unknown> = {}): {
 
 describe("effectBuilder proxy compatibility", () => {
   it("preserves instanceof and virtual reflection surface", () => {
-    const builder = makeEffectORPC(runtime);
+    const builder = eos;
 
     expect(builder).toBeInstanceOf(EffectBuilder);
     expect("~orpc" in builder).toBe(true);
@@ -82,7 +80,7 @@ describe("effectBuilder proxy compatibility", () => {
   });
 
   it("keeps extracted forwarded and intercepted methods callable", () => {
-    const builder = makeEffectORPC(runtime).$meta({ mode: "dev" });
+    const builder = eos.$meta({ mode: "dev" });
 
     const meta = builder.meta;
     const prefixed = builder.prefix;
@@ -102,8 +100,8 @@ describe("effectBuilder proxy compatibility", () => {
   });
 
   it("preserves wrapped chaining across forwarded and intercepted methods", () => {
-    const routedBuilder = makeEffectORPC(runtime).prefix("/api").tag("users");
-    const builder = makeEffectORPC(runtime)
+    const routedBuilder = eos.prefix("/api").tag("users");
+    const builder = eos
       .$meta({ scope: "users" })
       .errors({ BAD_REQUEST: { message: "bad request" } })
       .traced("users.list")
@@ -121,7 +119,7 @@ describe("effectBuilder proxy compatibility", () => {
       ({ input }: { input: { id: string } }) => input,
     );
     expect(procedure).toBeInstanceOf(EffectDecoratedProcedure);
-    expect(procedure["~effect"].runner.runtime).toBe(runtime);
+    expect(procedure["~effect"].runner.runtime).toBeUndefined();
   });
 
   it("preserves tagged class support in errors()", () => {
@@ -130,7 +128,7 @@ describe("effectBuilder proxy compatibility", () => {
       schema: z.object({ userId: z.string() }),
     }) {}
 
-    const builder = makeEffectORPC(runtime).errors({
+    const builder = eos.errors({
       UserNotFoundError,
     });
 
@@ -141,7 +139,7 @@ describe("effectBuilder proxy compatibility", () => {
   });
 
   it("keeps handler, effect, router, and lazy return behavior unchanged", async () => {
-    const builder = makeEffectORPC(runtime);
+    const builder = eos;
     const procedure = builder.effect(function* () {
       return { output: "pong" };
     });
@@ -155,15 +153,15 @@ describe("effectBuilder proxy compatibility", () => {
 
     expect(handled).toBeInstanceOf(EffectDecoratedProcedure);
     expect(effected).toBeInstanceOf(EffectDecoratedProcedure);
-    expect(routed.ping["~effect"].runner.runtime).toBe(runtime);
+    expect(routed.ping["~effect"].runner.runtime).toBeUndefined();
     expect(isLazy(lazied)).toBe(true);
 
     const { default: resolved } = await unlazy(lazied as any);
-    expect(resolved.ping["~effect"].runner.runtime).toBe(runtime);
+    expect(resolved.ping["~effect"].runner.runtime).toBeUndefined();
   });
 
   it("preserves decorated procedure proxy reflection and extracted methods", () => {
-    const procedure = makeEffectORPC(runtime)
+    const procedure = eos
       .route({ path: "/users" })
       .handler(({ input }) => input);
 
@@ -206,7 +204,7 @@ describe("effectBuilder proxy compatibility", () => {
   });
 
   it("keeps callable procedure clients executable while exposing the procedure surface", async () => {
-    const procedure = makeEffectORPC(runtime).handler(({ input }) => ({
+    const procedure = eos.handler(({ input }) => ({
       echoed: input,
     }));
 
@@ -214,14 +212,14 @@ describe("effectBuilder proxy compatibility", () => {
 
     await expect(callable("hello")).resolves.toEqual({ echoed: "hello" });
     expect(callable).toSatisfy(isProcedure);
-    expect(callable["~effect"].runner.runtime).toBe(runtime);
+    expect(callable["~effect"].runner.runtime).toBeUndefined();
     expect(callable.route({ path: "/echo" })).toBeInstanceOf(
       EffectDecoratedProcedure,
     );
   });
 
   it("applies builder route and middleware enhancements to routed procedures", () => {
-    const builder = makeEffectORPC(runtime);
+    const builder = eos;
     const middleware = builder.middleware(({ next }) => next({}));
     const procedure = builder.route({ path: "/ping" }).handler(() => "pong");
 
@@ -238,7 +236,7 @@ describe("effectBuilder proxy compatibility", () => {
   });
 
   it("rewraps unknown builder-like methods and passes through non-builder results", () => {
-    const builder = makeEffectORPC(runtime, makeCustomBuilder() as any) as any;
+    const builder = makeEffectORPC(makeCustomBuilder() as any) as any;
 
     const customBuilderLike = builder.customBuilderLike;
     const customValue = builder.customValue;

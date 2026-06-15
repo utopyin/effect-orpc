@@ -1,6 +1,6 @@
 import type { InferSchemaOutput } from "@orpc/contract";
 import { isContractProcedure } from "@orpc/contract";
-import { call, os } from "@orpc/server";
+import { call, createRouterClient, os } from "@orpc/server";
 import {
   Context,
   Effect,
@@ -8,6 +8,7 @@ import {
   Layer,
   ManagedRuntime,
   Option,
+  Tracer,
 } from "effect";
 import { beforeEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 import z from "zod";
@@ -51,6 +52,56 @@ const def = {
 
 const builder = new EffectBuilder(def);
 
+type RecordedSpan = {
+  readonly name: string;
+  readonly parentName: string | undefined;
+};
+
+function makeRecordedRuntime() {
+  const spans: Array<RecordedSpan> = [];
+  const spanNamesById = new Map<string, string>();
+  const tracer = Tracer.make({
+    context: (f) => f(),
+    span(name, parent, context, links, startTime, kind) {
+      const spanId = `span-${spans.length + 1}`;
+      spans.push({
+        name,
+        parentName: Option.match(parent, {
+          onNone: () => undefined,
+          onSome: (span) => spanNamesById.get(span.spanId),
+        }),
+      });
+      spanNamesById.set(spanId, name);
+      const attributes = new Map<string, unknown>();
+
+      return {
+        _tag: "Span" as const,
+        name,
+        spanId,
+        traceId: "trace",
+        parent,
+        context,
+        status: { _tag: "Started" as const, startTime },
+        attributes,
+        links,
+        sampled: true,
+        kind,
+        end() {},
+        attribute(key: string, value: unknown) {
+          attributes.set(key, value);
+        },
+        event() {},
+        addLinks() {},
+      };
+    },
+  });
+
+  return {
+    runtime: ManagedRuntime.make(Layer.setTracer(tracer)),
+    spans,
+  };
+}
+
 beforeEach(() => vi.clearAllMocks());
 
 describe("effectBuilder", () => {
@@ -77,15 +128,55 @@ describe("effectBuilder", () => {
   });
 
   describe(".use", () => {
-    it("without map input", () => {
-      const mid2 = vi.fn();
+    it("without map input", async () => {
+      const mid2 = vi.fn(({ next }) =>
+        next({ context: { fromMiddleware: true } }),
+      );
       const applied = builder.use(mid2);
 
       expect(applied).instanceOf(EffectBuilder);
       expect(applied).not.toBe(builder);
-      expect(applied["~effect"]).toEqual({
-        ...def,
-        middlewares: [mid, mid2],
+      expect(applied["~effect"].middlewares).toHaveLength(2);
+      expect(applied["~effect"].middlewares[0]).toBe(mid);
+
+      const wrapped = applied["~effect"].middlewares[1]!;
+      const procedure = eos.effect(function* () {
+        return "ok";
+      });
+      let nextCalls = 0;
+      let nextOptions: unknown;
+      const next = <TContext extends Record<PropertyKey, unknown>>(options?: {
+        context?: TContext;
+      }) => {
+        nextCalls++;
+        nextOptions = options;
+        return Promise.resolve({
+          output: "ok",
+          context: options?.context ?? ({} as TContext),
+        });
+      };
+      await expect(
+        wrapped(
+          {
+            context: {},
+            errors: {},
+            path: [],
+            procedure,
+            signal: undefined,
+            lastEventId: undefined,
+            next,
+          },
+          "input",
+          vi.fn(),
+        ),
+      ).resolves.toEqual({
+        output: "ok",
+        context: { fromMiddleware: true },
+      });
+      expect(mid2).toHaveBeenCalledOnce();
+      expect(nextCalls).toBe(1);
+      expect(nextOptions).toEqual({
+        context: { fromMiddleware: true },
       });
     });
   });
@@ -380,6 +471,17 @@ describe("makeEffectORPC factory", () => {
     expect(result).toBe(3);
   });
 
+  it("supports Effect.fn handlers", async () => {
+    const procedure = eos.input(z.number()).effect(
+      Effect.fn("test.effect-handler")(function* ({ input }) {
+        const increment = yield* Effect.succeed(1);
+        return input + increment;
+      }),
+    );
+
+    await expect(call(procedure, 41)).resolves.toBe(42);
+  });
+
   it("chains builder methods correctly", () => {
     const effectBuilder = makeEffectORPC(runtime);
 
@@ -532,10 +634,8 @@ describe("effect with services", () => {
       { id: string }
     >() {}
 
-    const effectBuilder = makeEffectORPC(runtime).$context<{
-      user: { id: string };
-    }>();
-    const procedure = effectBuilder
+    const procedure = eos
+      .$context<{ user: { id: string } }>()
       .provide(CurrentUser, ({ context }) => Effect.succeed(context.user))
       .effect(function* () {
         return yield* CurrentUser;
@@ -544,6 +644,33 @@ describe("effect with services", () => {
     await expect(
       call(procedure, undefined, { context: { user: { id: "u-1" } } }),
     ).resolves.toEqual({ id: "u-1" });
+  });
+
+  it(".provide supports generator request-scoped providers", async () => {
+    class UserPrefix extends Context.Tag("ProviderUserPrefix")<
+      UserPrefix,
+      { prefix: string }
+    >() {}
+    class CurrentUser extends Context.Tag("GeneratorProviderCurrentUser")<
+      CurrentUser,
+      { id: string }
+    >() {}
+
+    const procedure = eos
+      .$context<{ user: { id: string } }>()
+      .provide(UserPrefix, () => Effect.succeed({ prefix: "user:" }))
+      .provide(CurrentUser, function* ({ context }) {
+        expectTypeOf(context.user).toEqualTypeOf<{ id: string }>();
+        const prefix = yield* UserPrefix;
+        return { id: `${prefix.prefix}${context.user.id}` };
+      })
+      .effect(function* () {
+        return yield* CurrentUser;
+      });
+
+    await expect(
+      call(procedure, undefined, { context: { user: { id: "u-1" } } }),
+    ).resolves.toEqual({ id: "user:u-1" });
   });
 
   it(".provide service overrides the same service from the runtime", async () => {
@@ -575,7 +702,7 @@ describe("effect with services", () => {
 
   it("Effect .use yield* next() without return runs handler once", async () => {
     let runs = 0;
-    const procedure = makeEffectORPC(runtime)
+    const procedure = eos
       .use(function* ({ next }) {
         yield* Effect.void;
         yield* next();
@@ -591,7 +718,7 @@ describe("effect with services", () => {
 
   it("Effect .use guard-only middleware without next runs handler once", async () => {
     let runs = 0;
-    const procedure = makeEffectORPC(runtime)
+    const procedure = eos
       .use(function* () {
         yield* Effect.void;
       })
@@ -625,10 +752,8 @@ describe("effect with services", () => {
     >() {}
 
     let seenUser: { id: string } | undefined;
-    const effectBuilder = makeEffectORPC(runtime).$context<{
-      user: { id: string };
-    }>();
-    const procedure = effectBuilder
+    const procedure = eos
+      .$context<{ user: { id: string } }>()
       .provide(CurrentUser, ({ context }) => Effect.succeed(context.user))
       .use(function* () {
         seenUser = yield* CurrentUser;
@@ -644,8 +769,6 @@ describe("effect with services", () => {
   });
 
   it("Effect .middleware can create reusable generator middleware", async () => {
-    const eos = makeEffectORPC(runtime);
-
     const reusable = eos.middleware(function* ({ next }, input: string) {
       expectTypeOf(input).toEqualTypeOf<string>();
       return yield* next({ context: { seenInput: input } });
@@ -668,20 +791,64 @@ describe("effect with services", () => {
       { value: string }
     >() {}
 
-    const eos = makeEffectORPC(runtime).provide(MiddlewareService, () =>
+    const builder = eos.provide(MiddlewareService, () =>
       Effect.succeed({ value: "provided" }),
     );
 
-    const reusable = eos.middleware(function* ({ next }) {
+    const reusable = builder.middleware(function* ({ next }) {
       const service = yield* MiddlewareService;
       return yield* next({ context: { serviceValue: service.value } });
     });
 
-    const procedure = eos.use(reusable).effect(function* ({ context }) {
+    const procedure = builder.use(reusable).effect(function* ({ context }) {
       return context.serviceValue;
     });
 
     await expect(call(procedure, undefined)).resolves.toBe("provided");
+  });
+
+  it("Effect .use supports Effect.fn middleware", async () => {
+    const procedure = eos
+      .use(
+        Effect.fn("test.middleware")(function* ({ next }) {
+          yield* Effect.void;
+          return yield* next({ context: { fromEffectFn: true } });
+        }),
+      )
+      .effect(function* ({ context }) {
+        return context.fromEffectFn;
+      });
+
+    await expect(call(procedure, undefined)).resolves.toBe(true);
+  });
+
+  it("Effect .use supports Effect.gen-returning middleware", async () => {
+    const procedure = eos
+      .use(({ next }) =>
+        Effect.gen(function* () {
+          yield* Effect.void;
+          return yield* next({ context: { fromEffectGen: true } });
+        }),
+      )
+      .effect(function* ({ context }) {
+        return context.fromEffectGen;
+      });
+
+    await expect(call(procedure, undefined)).resolves.toBe(true);
+  });
+
+  it("Effect .use supports normal guard-only middleware", async () => {
+    let guarded = false;
+    const procedure = eos
+      .use(() => {
+        guarded = true;
+      })
+      .effect(function* () {
+        return "ok";
+      });
+
+    await expect(call(procedure, undefined)).resolves.toBe("ok");
+    expect(guarded).toBe(true);
   });
 
   it("Effect .use can enrich context through next", async () => {
@@ -690,10 +857,8 @@ describe("effect with services", () => {
       { id: string }
     >() {}
 
-    const effectBuilder = makeEffectORPC(runtime).$context<{
-      user: { id: string };
-    }>();
-    const procedure = effectBuilder
+    const procedure = eos
+      .$context<{ user: { id: string } }>()
       .provide(CurrentUser, ({ context }) => Effect.succeed(context.user))
       .use(function* ({ next }, _input) {
         const user = yield* CurrentUser;
@@ -709,7 +874,7 @@ describe("effect with services", () => {
   });
 
   it("Effect .use can transform downstream output", async () => {
-    const procedure = makeEffectORPC(runtime)
+    const procedure = eos
       .use(function* ({ next }, _input, output) {
         const result = yield* next();
         return yield* output(`${result.output}-wrapped`);
@@ -722,7 +887,7 @@ describe("effect with services", () => {
   });
 
   it("Effect .use can transform typed downstream output after .output", async () => {
-    const procedure = makeEffectORPC(runtime)
+    const procedure = eos
       .output(z.string())
       .use(function* ({ next }, _input, output) {
         const result = yield* next();
@@ -737,7 +902,7 @@ describe("effect with services", () => {
   });
 
   it("Effect .use can read typed input after .input", async () => {
-    const procedure = makeEffectORPC(runtime)
+    const procedure = eos
       .input(z.object({ value: z.number() }))
       .use(function* ({ next }, input) {
         expectTypeOf(input).toMatchTypeOf<{ value: number }>();
@@ -751,7 +916,7 @@ describe("effect with services", () => {
   });
 
   it("Effect .use can read typed input and output after .input().output()", async () => {
-    const procedure = makeEffectORPC(runtime)
+    const procedure = eos
       .input(z.object({ value: z.number() }))
       .output(z.string())
       .use(function* ({ next }, input, output) {
@@ -768,7 +933,7 @@ describe("effect with services", () => {
   });
 
   it("Effect .use can transform typed downstream output after .effect", async () => {
-    const procedure = makeEffectORPC(runtime)
+    const procedure = eos
       .effect(function* () {
         return "ok";
       })
@@ -840,7 +1005,7 @@ describe("effect with services", () => {
       { id: string }
     >() {}
 
-    const procedure = makeEffectORPC(runtime)
+    const procedure = eos
       .$context<{ user?: { id: string } }>()
       .provideOptional(CurrentUser, ({ context }) =>
         Effect.succeed(Option.fromNullable(context.user)),
@@ -854,13 +1019,34 @@ describe("effect with services", () => {
     ).resolves.toEqual(Option.some({ id: "u-6" }));
   });
 
+  it(".provideOptional supports generator request-scoped providers", async () => {
+    class CurrentUser extends Context.Tag("GeneratorOptionalCurrentUser")<
+      CurrentUser,
+      { id: string }
+    >() {}
+
+    const procedure = eos
+      .$context<{ user?: { id: string } }>()
+      .provideOptional(CurrentUser, function* ({ context }) {
+        yield* Effect.void;
+        return Option.fromNullable(context.user);
+      })
+      .effect(function* () {
+        return yield* Effect.serviceOption(CurrentUser);
+      });
+
+    await expect(
+      call(procedure, undefined, { context: { user: { id: "u-7" } } }),
+    ).resolves.toEqual(Option.some({ id: "u-7" }));
+  });
+
   it(".provideOptional leaves absent request-scoped services unavailable", async () => {
     class CurrentUser extends Context.Tag("OptionalCurrentUserAbsent")<
       CurrentUser,
       { id: string }
     >() {}
 
-    const procedure = makeEffectORPC(runtime)
+    const procedure = eos
       .$context<{ user?: { id: string } }>()
       .provideOptional(CurrentUser, ({ context }) =>
         Effect.succeed(Option.fromNullable(context.user)),
@@ -880,7 +1066,7 @@ describe("effect with services", () => {
       { readonly value: string }
     >() {}
 
-    makeEffectORPC(runtime)
+    eos
       .provideOptional(OptionalService, () =>
         Effect.succeed(Option.some({ value: "provided" })),
       )
@@ -895,12 +1081,10 @@ describe("effect with services", () => {
 
 describe(".traced", () => {
   it("creates an EffectBuilder with span config", () => {
-    const effectBuilder = makeEffectORPC(runtime);
-
-    const traced = effectBuilder.traced("users.getUser");
+    const traced = eos.traced("users.getUser");
 
     expect(traced).instanceOf(EffectBuilder);
-    expect(traced).not.toBe(effectBuilder);
+    expect(traced).not.toBe(eos);
     expect(traced["~effect"].spanConfig).toBeDefined();
     expect(traced["~effect"].spanConfig?.name).toBe("users.getUser");
     expect(traced["~effect"].spanConfig?.captureStackTrace).toBeInstanceOf(
@@ -909,9 +1093,7 @@ describe(".traced", () => {
   });
 
   it("preserves span config through chained methods", () => {
-    const effectBuilder = makeEffectORPC(runtime);
-
-    const procedure = effectBuilder
+    const procedure = eos
       .input(z.object({ id: z.string() }))
       .traced("users.getUser")
       .effect(function* () {
@@ -922,56 +1104,60 @@ describe(".traced", () => {
     // The span wrapping happens in the handler, so we just verify the procedure was created
   });
 
-  it("traced procedure handler runs successfully", async () => {
-    const effectBuilder = makeEffectORPC(runtime);
-
-    const procedure = effectBuilder
+  it("traced procedure runs through a routed client", async () => {
+    const procedure = eos
       .input(z.object({ id: z.string() }))
       .traced("users.getUser")
       .effect(function* ({ input }) {
         return { id: input.id, name: "Alice" };
       });
+    const client = createRouterClient({ users: { getUser: procedure } });
 
-    const result = await procedure["~effect"].handler({
-      context: {},
-      input: { id: "123" },
-      path: ["users", "getUser"],
-      procedure: procedure as any,
-      signal: undefined,
-      lastEventId: undefined,
-      errors: {},
+    await expect(client.users.getUser({ id: "123" })).resolves.toEqual({
+      id: "123",
+      name: "Alice",
     });
-
-    expect(result).toEqual({ id: "123", name: "Alice" });
   });
 
-  it("traced procedure with Effect.fn generator syntax", async () => {
-    const effectBuilder = makeEffectORPC(runtime);
+  it("traced procedure uses the explicit span name at runtime", async () => {
+    const recorded = makeRecordedRuntime();
+    const effectBuilder = makeEffectORPC(recorded.runtime);
 
-    const procedure = effectBuilder.traced("math.add").effect(function* () {
+    const procedure = effectBuilder
+      .traced("custom.users.getUser")
+      .effect(function* () {
+        return "ok";
+      });
+    const client = createRouterClient({ users: { getUser: procedure } });
+
+    try {
+      await expect(client.users.getUser(undefined)).resolves.toBe("ok");
+      expect(recorded.spans).toContainEqual({
+        name: "custom.users.getUser",
+        parentName: undefined,
+      });
+      expect(recorded.spans.map(({ name }) => name)).not.toContain(
+        "users.getUser",
+      );
+    } finally {
+      await recorded.runtime.dispose();
+    }
+  });
+
+  it("traced procedure with generator syntax runs through a routed client", async () => {
+    const procedure = eos.traced("math.add").effect(function* () {
       const a = yield* Effect.succeed(10);
       const b = yield* Effect.succeed(20);
       return a + b;
     });
+    const client = createRouterClient({ math: { add: procedure } });
 
-    const result = await procedure["~effect"].handler({
-      context: {},
-      input: undefined,
-      path: ["math", "add"],
-      procedure: procedure as any,
-      signal: undefined,
-      lastEventId: undefined,
-      errors: {},
-    });
-
-    expect(result).toBe(30);
+    await expect(client.math.add(undefined)).resolves.toBe(30);
   });
 
   it("captures stack trace at definition time", () => {
-    const effectBuilder = makeEffectORPC(runtime);
-
     // The stack trace is captured when .traced() is called
-    const traced = effectBuilder.traced("test.procedure");
+    const traced = eos.traced("test.procedure");
 
     const stackTrace = traced["~effect"].spanConfig?.captureStackTrace();
     // The stack trace should be a string containing the file location
@@ -983,71 +1169,49 @@ describe(".traced", () => {
 });
 
 describe("default tracing (without .traced())", () => {
-  it("procedure without .traced() still runs successfully", async () => {
-    const effectBuilder = makeEffectORPC(runtime);
-
-    // No .traced() call - should still work and use path as span name
-    const procedure = effectBuilder
+  it("procedure without .traced() runs through a routed client", async () => {
+    const procedure = eos
       .input(z.object({ id: z.string() }))
       .effect(function* ({ input }) {
         return { id: input.id, name: "Bob" };
       });
+    const client = createRouterClient({ users: { findById: procedure } });
 
-    const result = await procedure["~effect"].handler({
-      context: {},
-      input: { id: "456" },
-      path: ["users", "findById"],
-      procedure: procedure as any,
-      signal: undefined,
-      lastEventId: undefined,
-      errors: {},
+    await expect(client.users.findById({ id: "456" })).resolves.toEqual({
+      id: "456",
+      name: "Bob",
     });
-
-    expect(result).toEqual({ id: "456", name: "Bob" });
   });
 
-  it("uses procedure path as default span name", async () => {
-    const effectBuilder = makeEffectORPC(runtime);
+  it("uses procedure path as default span name at runtime", async () => {
+    const recorded = makeRecordedRuntime();
+    const effectBuilder = makeEffectORPC(recorded.runtime);
 
-    // Without .traced(), the span name should be derived from path
     const procedure = effectBuilder.effect(function* () {
       return "hello";
     });
+    const client = createRouterClient({ api: { v1: { greet: procedure } } });
 
-    // The procedure should work with any path
-    const result = await procedure["~effect"].handler({
-      context: {},
-      input: undefined,
-      path: ["api", "v1", "greet"],
-      procedure: procedure as any,
-      signal: undefined,
-      lastEventId: undefined,
-      errors: {},
-    });
-
-    expect(result).toBe("hello");
+    try {
+      await expect(client.api.v1.greet(undefined)).resolves.toBe("hello");
+      expect(recorded.spans).toContainEqual({
+        name: "api.v1.greet",
+        parentName: undefined,
+      });
+    } finally {
+      await recorded.runtime.dispose();
+    }
   });
 
-  it("default tracing works with Effect.fn generator", async () => {
-    const effectBuilder = makeEffectORPC(runtime);
-
-    const procedure = effectBuilder.effect(function* () {
+  it("default tracing works with generator handlers through a routed client", async () => {
+    const procedure = eos.effect(function* () {
       const x = 5;
       const y = 10;
       return x * y;
     });
+    const client = createRouterClient({ math: { multiply: procedure } });
 
-    const result = await procedure["~effect"].handler({
-      context: {},
-      input: undefined,
-      path: ["math", "multiply"],
-      procedure: procedure as any,
-      signal: undefined,
-      lastEventId: undefined,
-      errors: {},
-    });
-
-    expect(result).toBe(50);
+    await expect(client.math.multiply(undefined)).resolves.toBe(50);
   });
 
   it("default tracing works with services from runtime", async () => {
@@ -1068,36 +1232,29 @@ describe("default tracing (without .traced())", () => {
       .effect(function* ({ input }) {
         return yield* Greeter.greet(input.name);
       });
+    const client = createRouterClient({ greeting: { say: procedure } });
 
-    const result = await procedure["~effect"].handler({
-      context: {},
-      input: { name: "World" },
-      path: ["greeting", "say"],
-      procedure: procedure as any,
-      signal: undefined,
-      lastEventId: undefined,
-      errors: {},
-    });
-
-    expect(result).toBe("Hello, World!");
-
-    await serviceRuntime.dispose();
+    try {
+      await expect(client.greeting.say({ name: "World" })).resolves.toBe(
+        "Hello, World!",
+      );
+    } finally {
+      await serviceRuntime.dispose();
+    }
   });
 
   it("no spanConfig is set when .traced() is not called", () => {
-    const effectBuilder = makeEffectORPC(runtime);
-
     // Without .traced(), spanConfig should be undefined
-    expect(effectBuilder["~effect"].spanConfig).toBeUndefined();
+    expect(eos["~effect"].spanConfig).toBeUndefined();
 
-    const withInput = effectBuilder.input(z.string());
+    const withInput = eos.input(z.string());
     expect(withInput["~effect"].spanConfig).toBeUndefined();
   });
 
   it("enforces the declared output schema for effect handlers", () => {
     const declaredOutputSchema = z.object({ name: z.string() });
 
-    makeEffectORPC(runtime)
+    eos
       .input(z.string())
       .output(declaredOutputSchema)
       .effect(
@@ -1107,7 +1264,7 @@ describe("default tracing (without .traced())", () => {
         },
       );
 
-    const procedure = makeEffectORPC(runtime)
+    const procedure = eos
       .output(declaredOutputSchema)
       // @ts-expect-error output() should constrain the effect return type
       .effect(function* () {
@@ -1126,14 +1283,14 @@ describe("default tracing (without .traced())", () => {
       { readonly value: string }
     >() {}
 
-    makeEffectORPC(runtime).effect(
+    eos.effect(
       // @ts-expect-error MissingService is not available from the runtime or .provide
       function* () {
         return yield* MissingService;
       },
     );
 
-    makeEffectORPC(runtime)
+    eos
       .provide(MissingService, () => Effect.succeed({ value: "provided" }))
       .effect(function* () {
         return yield* MissingService;
@@ -1145,7 +1302,7 @@ describe("default tracing (without .traced())", () => {
       "MissingMiddlewareService",
     )<MissingMiddlewareService, { readonly value: string }>() {}
 
-    makeEffectORPC(runtime)
+    eos
       .use(
         // @ts-expect-error MissingMiddlewareService is not available from the runtime or .provide
         function* () {
@@ -1156,7 +1313,7 @@ describe("default tracing (without .traced())", () => {
         return "ok";
       });
 
-    makeEffectORPC(runtime)
+    eos
       .provide(MissingMiddlewareService, () =>
         Effect.succeed({ value: "provided" }),
       )

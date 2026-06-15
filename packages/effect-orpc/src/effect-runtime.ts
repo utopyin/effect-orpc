@@ -9,10 +9,10 @@ import type {
   ProcedureHandlerOptions,
 } from "@orpc/server";
 import type { Promisable } from "@orpc/shared";
-import type { ManagedRuntime } from "effect";
-import { Cause, Context, Effect, Exit, Option, Result } from "effect";
+import { Cause, Effect, Exit, Option, Result } from "effect";
 
-import { getCurrentServices, runWithServices } from "./service-context-bridge";
+import type { EffectRuntimeRunner } from "./runtime-source";
+import { runWithServices } from "./service-context-bridge";
 import type { EffectErrorConstructorMap, EffectErrorMap } from "./tagged-error";
 import {
   createEffectErrorConstructorMap,
@@ -90,7 +90,7 @@ export function createEffectProcedureHandler<
   TRuntimeError,
   TMeta extends Meta,
 >(options: {
-  runtime: ManagedRuntime.ManagedRuntime<TRequirementsProvided, TRuntimeError>;
+  runner: EffectRuntimeRunner<TRequirementsProvided, TRuntimeError>;
   effectErrorMap: TEffectErrorMap;
   effectFn: EffectProcedureHandler<
     TCurrentContext,
@@ -111,7 +111,7 @@ export function createEffectProcedureHandler<
   TMeta & Record<never, never>
 > {
   const {
-    runtime,
+    runner,
     effectErrorMap,
     effectFn,
     effectSteps = [],
@@ -157,11 +157,9 @@ export function createEffectProcedureHandler<
       spanName,
       { captureStackTrace },
     );
-    const exit = await runPromiseExitWithParentServices(
-      runtime,
-      tracedEffect,
-      opts.signal,
-    );
+    const exit = await runner.runPromiseExit(tracedEffect, {
+      signal: opts.signal,
+    });
 
     if (Exit.isFailure(exit)) {
       throw toORPCErrorFromCause(exit.cause);
@@ -179,7 +177,7 @@ export function createEffectPipelineMiddleware<
   TRuntimeError,
   TMeta extends Meta,
 >(options: {
-  runtime: ManagedRuntime.ManagedRuntime<TRequirementsProvided, TRuntimeError>;
+  runner: EffectRuntimeRunner<TRequirementsProvided, TRuntimeError>;
   effectErrorMap: TEffectErrorMap;
   steps: readonly EffectPipelineStep[];
 }): Middleware<
@@ -190,7 +188,7 @@ export function createEffectPipelineMiddleware<
   any,
   TMeta
 > {
-  const { runtime, effectErrorMap, steps } = options;
+  const { runner, effectErrorMap, steps } = options;
 
   return async (opts, input) => {
     const baseOptions = makeEffectOptions<
@@ -199,7 +197,14 @@ export function createEffectPipelineMiddleware<
       TEffectErrorMap,
       TMeta
     >(opts, input, effectErrorMap);
-    const effect = runEffectPipeline({
+    const effect = runEffectPipeline<
+      TCurrentContext,
+      unknown,
+      TOutput,
+      TEffectErrorMap,
+      TRequirementsProvided,
+      TMeta
+    >({
       baseOptions,
       effectErrorMap,
       final: (context) =>
@@ -213,11 +218,9 @@ export function createEffectPipelineMiddleware<
       input,
       steps,
     });
-    const exit = await runPromiseExitWithParentServices(
-      runtime,
-      effect as any,
-      opts.signal,
-    );
+    const exit = await runner.runPromiseExit(effect, {
+      signal: opts.signal,
+    });
 
     if (Exit.isFailure(exit)) throw toORPCErrorFromCause(exit.cause);
 
@@ -234,7 +237,7 @@ export function createEffectProviderMiddleware<
   TMeta extends Meta,
   TTag extends EffectTag,
 >(options: {
-  runtime: ManagedRuntime.ManagedRuntime<TRequirementsProvided, TRuntimeError>;
+  runner: EffectRuntimeRunner<TRequirementsProvided, TRuntimeError>;
   effectErrorMap: TEffectErrorMap;
   tag: TTag;
   provider: EffectProvider<
@@ -246,7 +249,7 @@ export function createEffectProviderMiddleware<
     TTag
   >;
 }): Middleware<TCurrentContext, Record<never, never>, TInput, any, any, TMeta> {
-  const { runtime, effectErrorMap, tag, provider } = options;
+  const { runner, effectErrorMap, tag, provider } = options;
 
   return async (opts, input) => {
     const effectOpts = makeEffectOptions<
@@ -262,11 +265,9 @@ export function createEffectProviderMiddleware<
         service,
       ),
     );
-    const exit = await runPromiseExitWithParentServices(
-      runtime,
-      effect as any,
-      opts.signal,
-    );
+    const exit = await runner.runPromiseExit(effect, {
+      signal: opts.signal,
+    });
 
     if (Exit.isFailure(exit)) throw toORPCErrorFromCause(exit.cause);
 
@@ -283,7 +284,7 @@ export function createEffectOptionalProviderMiddleware<
   TMeta extends Meta,
   TTag extends EffectTag,
 >(options: {
-  runtime: ManagedRuntime.ManagedRuntime<TRequirementsProvided, TRuntimeError>;
+  runner: EffectRuntimeRunner<TRequirementsProvided, TRuntimeError>;
   effectErrorMap: TEffectErrorMap;
   tag: TTag;
   provider: EffectOptionalProvider<
@@ -295,7 +296,7 @@ export function createEffectOptionalProviderMiddleware<
     TTag
   >;
 }): Middleware<TCurrentContext, Record<never, never>, TInput, any, any, TMeta> {
-  const { runtime, effectErrorMap, tag, provider } = options;
+  const { runner, effectErrorMap, tag, provider } = options;
 
   return async (opts, input) => {
     const effectOpts = makeEffectOptions<
@@ -315,11 +316,9 @@ export function createEffectOptionalProviderMiddleware<
           ),
       }),
     );
-    const exit = await runPromiseExitWithParentServices(
-      runtime,
-      effect as any,
-      opts.signal,
-    );
+    const exit = await runner.runPromiseExit(effect, {
+      signal: opts.signal,
+    });
 
     if (Exit.isFailure(exit)) throw toORPCErrorFromCause(exit.cause);
 
@@ -570,17 +569,4 @@ function withCurrentServiceContext<T, R = never>(
       runWithServices(services, () => Promise.resolve(fn())),
     ),
   );
-}
-
-async function runPromiseExitWithParentServices<A, E, R>(
-  runtime: ManagedRuntime.ManagedRuntime<R, E>,
-  effect: Effect.Effect<A, E, R>,
-  signal?: AbortSignal,
-): Promise<Exit.Exit<A, E>> {
-  const parentServices = getCurrentServices();
-  return parentServices
-    ? Effect.runPromiseExitWith(
-        Context.merge(await runtime.context(), parentServices),
-      )(effect, { signal })
-    : runtime.runPromiseExit(effect, { signal });
 }

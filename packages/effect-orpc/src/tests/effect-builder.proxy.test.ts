@@ -121,7 +121,7 @@ describe("effectBuilder proxy compatibility", () => {
       ({ input }: { input: { id: string } }) => input,
     );
     expect(procedure).toBeInstanceOf(EffectDecoratedProcedure);
-    expect(procedure["~effect"].runtime).toBe(runtime);
+    expect(procedure["~effect"].runner.runtime).toBe(runtime);
   });
 
   it("preserves tagged class support in errors()", () => {
@@ -155,11 +155,11 @@ describe("effectBuilder proxy compatibility", () => {
 
     expect(handled).toBeInstanceOf(EffectDecoratedProcedure);
     expect(effected).toBeInstanceOf(EffectDecoratedProcedure);
-    expect(routed.ping["~effect"].runtime).toBe(runtime);
+    expect(routed.ping["~effect"].runner.runtime).toBe(runtime);
     expect(isLazy(lazied)).toBe(true);
 
     const { default: resolved } = await unlazy(lazied as any);
-    expect(resolved.ping["~effect"].runtime).toBe(runtime);
+    expect(resolved.ping["~effect"].runner.runtime).toBe(runtime);
   });
 
   it("preserves decorated procedure proxy reflection and extracted methods", () => {
@@ -214,7 +214,7 @@ describe("effectBuilder proxy compatibility", () => {
 
     await expect(callable("hello")).resolves.toEqual({ echoed: "hello" });
     expect(callable).toSatisfy(isProcedure);
-    expect(callable["~effect"].runtime).toBe(runtime);
+    expect(callable["~effect"].runner.runtime).toBe(runtime);
     expect(callable.route({ path: "/echo" })).toBeInstanceOf(
       EffectDecoratedProcedure,
     );

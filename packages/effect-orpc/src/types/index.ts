@@ -24,14 +24,9 @@ import type {
   RouterBuilder,
 } from "@orpc/server";
 import type { MaybeOptionalOptions } from "@orpc/shared";
-import type {
-  Context as EffectContext,
-  Effect,
-  Layer,
-  ManagedRuntime,
-  Option,
-} from "effect";
+import type { Context as EffectContext, Effect, Layer, Option } from "effect";
 
+import type { EffectRuntimeRunner } from "../runtime-source";
 import type {
   EffectErrorConstructorMap,
   EffectErrorMap,
@@ -53,7 +48,7 @@ type EffectBuilderDefBase<
   >;
 
 /**
- * Extended builder definition that includes the Effect ManagedRuntime.
+ * Extended builder definition that includes Effect execution state.
  */
 export interface EffectBuilderDef<
   TInputSchema extends AnySchema,
@@ -68,7 +63,7 @@ export interface EffectBuilderDef<
   TEffectErrorMap,
   TMeta
 > {
-  runtime: ManagedRuntime.ManagedRuntime<TRequirementsProvided, TRuntimeError>;
+  runner: EffectRuntimeRunner<TRequirementsProvided, TRuntimeError>;
   /**
    * Optional span configuration for Effect tracing.
    */
@@ -82,7 +77,7 @@ export interface EffectBuilderDef<
 }
 
 /**
- * Extended procedure definition that includes the Effect ManagedRuntime.
+ * Extended procedure definition that includes Effect execution state.
  */
 export interface EffectProcedureDef<
   TInitialContext extends Context,
@@ -101,7 +96,7 @@ export interface EffectProcedureDef<
   EffectErrorMapToErrorMap<TEffectErrorMap>,
   TMeta
 > {
-  runtime: ManagedRuntime.ManagedRuntime<TRequirementsProvided, TRuntimeError>;
+  runner: EffectRuntimeRunner<TRequirementsProvided, TRuntimeError>;
   effectErrorMap: TEffectErrorMap;
   effectSteps?: readonly EffectPipelineStep[];
   effectHandler?: EffectProcedureHandlerConfig;

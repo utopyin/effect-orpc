@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import z from "zod";
 
 import { EffectDecoratedProcedure } from "../effect-procedure";
+import { makeEffectRuntimeRunner } from "../runtime-source";
 import {
   baseErrorMap,
   baseMeta,
@@ -25,6 +26,7 @@ vi.mock("@orpc/server", async (importOriginal) => {
 });
 
 const runtime = ManagedRuntime.make(Layer.empty);
+const runner = makeEffectRuntimeRunner(runtime);
 
 const handler = vi.fn();
 const middleware = vi.fn();
@@ -40,6 +42,7 @@ const def = {
   meta: baseMeta,
   route: baseRoute,
   handler,
+  runner,
   runtime,
 };
 
@@ -80,7 +83,7 @@ describe("effectDecoratedProcedure", () => {
     });
 
     // Preserves runtime
-    expect(applied["~effect"].runtime).toBe(runtime);
+    expect(applied["~effect"].runner.runtime).toBe(runtime);
   });
 
   it(".meta", () => {
@@ -96,7 +99,7 @@ describe("effectDecoratedProcedure", () => {
     });
 
     // Preserves runtime
-    expect(applied["~effect"].runtime).toBe(runtime);
+    expect(applied["~effect"].runner.runtime).toBe(runtime);
   });
 
   it(".route", () => {
@@ -112,7 +115,7 @@ describe("effectDecoratedProcedure", () => {
     });
 
     // Preserves runtime
-    expect(applied["~effect"].runtime).toBe(runtime);
+    expect(applied["~effect"].runner.runtime).toBe(runtime);
   });
 
   describe(".use", () => {
@@ -129,7 +132,7 @@ describe("effectDecoratedProcedure", () => {
       });
 
       // Preserves runtime
-      expect(applied["~effect"].runtime).toBe(runtime);
+      expect(applied["~effect"].runner.runtime).toBe(runtime);
     });
 
     it("with map input", () => {
@@ -146,7 +149,7 @@ describe("effectDecoratedProcedure", () => {
       });
 
       // Preserves runtime
-      expect(applied["~effect"].runtime).toBe(runtime);
+      expect(applied["~effect"].runner.runtime).toBe(runtime);
     });
   });
 
@@ -207,7 +210,7 @@ describe("effectDecoratedProcedure chaining", () => {
       .route({ path: "/custom" });
 
     expect(applied).toBeInstanceOf(EffectDecoratedProcedure);
-    expect(applied["~effect"].runtime).toBe(runtime);
+    expect(applied["~effect"].runner.runtime).toBe(runtime);
     expect(applied["~effect"].errorMap).toHaveProperty("CUSTOM");
   });
 });

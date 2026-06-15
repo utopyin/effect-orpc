@@ -474,7 +474,7 @@ export interface EffectBuilderSurface<
   >;
   /**
    * Defines the handler of the procedure using an Effect.
-   * The Effect is executed using the ManagedRuntime provided during builder creation.
+   * The Effect is executed using the configured Effect runtime source.
    * The effect is automatically wrapped with `Effect.withSpan`.
    *
    * @see {@link https://orpc.dev/docs/procedure Procedure Docs}

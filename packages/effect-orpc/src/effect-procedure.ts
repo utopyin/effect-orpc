@@ -120,7 +120,7 @@ function getEffectProcedureDef(
     effectSteps: context.state.effectSteps,
     effectHandler: context.state.effectHandler,
     effectErrorMap: context.state.effectErrorMap,
-    runtime: context.state.runtime,
+    runner: context.state.runner,
   };
 }
 
@@ -136,7 +136,7 @@ function makeEffectProcedureHandler(
     effectErrorMap: def.effectErrorMap,
     effectFn: def.effectHandler.effectFn,
     effectSteps: def.effectSteps,
-    runtime: def.runtime,
+    runner: def.runner,
     spanConfig: def.effectHandler.spanConfig,
   });
 }
@@ -169,7 +169,7 @@ function flushEffectSteps(
 
   const middleware = createEffectPipelineMiddleware({
     effectErrorMap: def.effectErrorMap,
-    runtime: def.runtime,
+    runner: def.runner,
     steps: def.effectSteps,
   });
 
@@ -255,7 +255,7 @@ function createEffectProcedureProxy<
                     def.middlewares,
                     createEffectPipelineMiddleware({
                       effectErrorMap: state.effectErrorMap,
-                      runtime: state.runtime,
+                      runner: state.runner,
                       steps: [step],
                     }),
                   ),
@@ -279,7 +279,7 @@ function createEffectProcedureProxy<
                   createEffectProviderMiddleware({
                     effectErrorMap: state.effectErrorMap,
                     provider,
-                    runtime: state.runtime,
+                    runner: state.runner,
                     tag: tagOrLayer,
                   }),
                 ),
@@ -308,7 +308,7 @@ function createEffectProcedureProxy<
                   createEffectOptionalProviderMiddleware({
                     effectErrorMap: state.effectErrorMap,
                     provider,
-                    runtime: state.runtime,
+                    runner: state.runner,
                     tag,
                   }),
                 ),
@@ -473,7 +473,7 @@ export class EffectProcedure<
       effectSteps,
       effectHandler,
       effectErrorMap: def.effectErrorMap,
-      runtime: def.runtime,
+      runner: def.runner,
     });
 
     if (new.target === EffectProcedure) {

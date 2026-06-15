@@ -315,7 +315,7 @@ export function ORPCTaggedError<
       return this[ORPCErrorSymbol];
     }
 
-    toJSON(): ORPCErrorJSON<TCode, InferSchemaOutput<TSchema>> & {
+    override toJSON(): ORPCErrorJSON<TCode, InferSchemaOutput<TSchema>> & {
       _tag: TTag;
     } {
       return {

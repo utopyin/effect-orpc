@@ -1,5 +1,11 @@
 # effect-orpc
 
+## 0.4.0
+
+### Minor Changes
+
+- 070f9aa: Add `eos`, the default Effect-aware builder for the `eos.provide(AppLive)` workflow. `ManagedRuntime` is now used only when you pass one explicitly, so applications can use Layer-provided builders by default and opt into a user-owned runtime when they need to control Layer acquisition and release from their application lifecycle.
+
 ## 0.3.0
 
 ### Minor Changes

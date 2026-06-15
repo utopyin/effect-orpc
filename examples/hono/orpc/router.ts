@@ -17,7 +17,7 @@ import {
   orderStatusSchema,
   type RequestContext,
 } from "../contract/shared";
-import { AppLive, runtime } from "../runtime";
+import { runtime } from "../runtime";
 import { OrderService } from "../services/order";
 
 export const contract = contractRouterBuilder.router({
@@ -33,7 +33,7 @@ const toTypedOrder = (order: {
 }): z.infer<typeof orderSchema> => orderSchema.parse(order);
 
 const directProcedureBuilder =
-  makeEffectORPC(AppLive).$context<RequestContext>();
+  makeEffectORPC(runtime).$context<RequestContext>();
 
 const directRouter = {
   orders: directProcedureBuilder
@@ -53,7 +53,7 @@ const directRouter = {
     }),
 };
 
-const contractImplementer = implementEffect(contract, AppLive)
+const contractImplementer = implementEffect(contract, runtime)
   .$context<RequestContext>()
   .use(({ context, next }) =>
     next({

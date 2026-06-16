@@ -1,0 +1,18 @@
+{
+  "mode": "pre",
+  "tag": "effect-v4",
+  "initialVersions": {
+    "effect-orpc": "0.1.2"
+  },
+  "changesets": [
+    "big-words-flow",
+    "calm-fiber-bridges",
+    "clean-runtime-runner",
+    "fluffy-times-shave",
+    "friendly-callback-shapes",
+    "great-queens-pay",
+    "late-betas-yell",
+    "proxy-v4-builder",
+    "silly-doodles-cover"
+  ]
+}

@@ -1,6 +1,6 @@
-import { Effect, Exit, FiberRefs, Layer, ManagedRuntime } from "effect";
+import { Context, Effect, Exit, Layer, ManagedRuntime } from "effect";
 
-import { getCurrentFiberRefs } from "./fiber-context-bridge";
+import { getCurrentServices } from "./service-context-bridge";
 
 export type EffectRuntimeSource<TRequirementsProvided, TRuntimeError> =
   | ManagedRuntime.ManagedRuntime<TRequirementsProvided, TRuntimeError>
@@ -26,9 +26,9 @@ export function makeEffectRuntimeRunner<
   if (source === undefined) {
     return {
       runPromiseExit: (effect, options) =>
-        Effect.runPromiseExit(withParentFiberRefs(effect as any), {
-          signal: options?.signal,
-        }) as Promise<Exit.Exit<any, any>>,
+        runPromiseExitWithCurrentServices(effect as any, options) as Promise<
+          Exit.Exit<any, any>
+        >,
     };
   }
 
@@ -40,9 +40,7 @@ export function makeEffectRuntimeRunner<
     return {
       runtime,
       runPromiseExit: (effect, options) =>
-        runtime.runPromiseExit(withParentFiberRefs(effect), {
-          signal: options?.signal,
-        }),
+        runManagedRuntimePromiseExit(runtime, effect, options),
     };
   }
 
@@ -54,23 +52,56 @@ export function makeEffectRuntimeRunner<
   return {
     runPromiseExit: (effect, options) =>
       Effect.runPromiseExit(
-        withParentFiberRefs(Effect.provide(effect as any, layer)),
+        provideLayerWithCurrentServices(effect as any, layer),
         { signal: options?.signal },
       ) as Promise<Exit.Exit<any, any>>,
   };
 }
 
-function withParentFiberRefs<A, E, R>(
+function runPromiseExitWithCurrentServices<A, E, R>(
   effect: Effect.Effect<A, E, R>,
-): Effect.Effect<A, E, R> {
-  const parentFiberRefs = getCurrentFiberRefs();
-  return parentFiberRefs
-    ? Effect.fiberIdWith((fiberId) =>
-        Effect.flatMap(Effect.getFiberRefs, (fiberRefs) =>
-          Effect.setFiberRefs(
-            FiberRefs.joinAs(fiberRefs, fiberId, parentFiberRefs),
-          ).pipe(Effect.andThen(effect)),
-        ),
-      )
-    : effect;
+  options?: { readonly signal?: AbortSignal },
+): Promise<Exit.Exit<A, E>> {
+  const parentServices = getCurrentServices();
+  return parentServices
+    ? (Effect.runPromiseExitWith(parentServices)(effect as any, {
+        signal: options?.signal,
+      }) as Promise<Exit.Exit<A, E>>)
+    : (Effect.runPromiseExit(effect as any, {
+        signal: options?.signal,
+      }) as Promise<Exit.Exit<A, E>>);
+}
+
+async function runManagedRuntimePromiseExit<A, E, R, ER>(
+  runtime: ManagedRuntime.ManagedRuntime<R, ER>,
+  effect: Effect.Effect<A, E, R>,
+  options?: { readonly signal?: AbortSignal },
+): Promise<Exit.Exit<A, E | ER>> {
+  const parentServices = getCurrentServices();
+  return parentServices
+    ? (Effect.runPromiseExitWith(
+        Context.merge(await runtime.context(), parentServices),
+      )(effect as any, { signal: options?.signal }) as Promise<
+        Exit.Exit<A, E | ER>
+      >)
+    : runtime.runPromiseExit(effect, { signal: options?.signal });
+}
+
+function provideLayerWithCurrentServices<A, E, R, ROut, E2>(
+  effect: Effect.Effect<A, E, R>,
+  layer: Layer.Layer<ROut, E2, never>,
+): Effect.Effect<A, E | E2, Exclude<R, ROut>> {
+  const parentServices = getCurrentServices();
+  if (!parentServices) {
+    return Effect.provide(effect, layer);
+  }
+
+  return Effect.scoped(
+    Effect.flatMap(Layer.build(layer), (layerContext) =>
+      Effect.provide(
+        effect as any,
+        Context.merge(layerContext, parentServices),
+      ),
+    ),
+  ) as any;
 }

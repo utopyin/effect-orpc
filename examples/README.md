@@ -8,5 +8,5 @@ workspaces.
 
 ## Available Examples
 
-- `hono-request-context`: Hono + oRPC + Effect with request-scoped `FiberRef`
+- `hono-request-context`: Hono + oRPC + Effect v4 with request-scoped context
   propagation using `withFiberContext` from `effect-orpc/node`.

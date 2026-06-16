@@ -1,6 +1,6 @@
 import { ORPCError, type Meta } from "@orpc/contract";
 import type {
-  Context,
+  Context as ORPCContext,
   Middleware,
   MiddlewareNextFnOptions,
   MiddlewareOptions,
@@ -10,10 +10,10 @@ import type {
   ProcedureHandlerOptions,
 } from "@orpc/server";
 import type { Promisable } from "@orpc/shared";
-import { Cause, Effect, Exit, FiberRefs, Option } from "effect";
+import { Cause, Effect, Exit, Option, Result } from "effect";
 
-import { runWithFiberRefs } from "./fiber-context-bridge";
 import type { EffectRuntimeRunner } from "./runtime-source";
+import { runWithServices } from "./service-context-bridge";
 import type { EffectErrorConstructorMap, EffectErrorMap } from "./tagged-error";
 import {
   createEffectErrorConstructorMap,
@@ -31,7 +31,8 @@ import type {
   EffectSpanConfig,
 } from "./types";
 
-type EffectTag = import("effect").Context.Tag<any, any>;
+type Context = ORPCContext;
+type EffectTag = import("effect").Context.Key<any, any>;
 
 const HybridContinuationSymbol = Symbol("effect-orpc/HybridContinuation");
 
@@ -65,42 +66,54 @@ type EffectMiddlewareRuntimeOptions<
 function toORPCErrorFromCause(
   cause: Cause.Cause<unknown>,
 ): ORPCError<string, unknown> {
-  return Cause.match(cause, {
-    onDie(defect) {
+  if (Cause.hasFails(cause)) {
+    const reason = Cause.findFail(cause);
+    if (Result.isFailure(reason)) {
+      return new ORPCError("INTERNAL_SERVER_ERROR");
+    }
+
+    const error = reason.success.error;
+    if (isORPCTaggedError(error)) {
+      return error.toORPCError();
+    }
+    if (error instanceof ORPCError) {
+      return error;
+    }
+
+    return new ORPCError("INTERNAL_SERVER_ERROR", {
+      cause: error,
+    });
+  }
+
+  if (Cause.hasDies(cause)) {
+    const reason = Cause.findDie(cause);
+    if (Result.isFailure(reason)) {
       return new ORPCError("INTERNAL_SERVER_ERROR", {
-        cause: defect,
+        cause: new Error(`Died by unknown reason`),
       });
-    },
-    onFail(error) {
-      if (isORPCTaggedError(error)) {
-        return error.toORPCError();
-      }
-      if (error instanceof ORPCError) {
-        return error;
-      }
+    }
+    return new ORPCError("INTERNAL_SERVER_ERROR", {
+      cause: reason.success.defect,
+    });
+  }
+
+  if (Cause.hasInterrupts(cause)) {
+    const reason = Cause.findInterrupt(cause);
+    if (Result.isFailure(reason)) {
       return new ORPCError("INTERNAL_SERVER_ERROR", {
-        cause: error,
+        cause: new Error(`Unknown fiber got interrupted`),
       });
-    },
-    onInterrupt(fiberId) {
-      return new ORPCError("INTERNAL_SERVER_ERROR", {
-        cause: new Error(`${fiberId} Interrupted`),
-      });
-    },
-    onSequential(left) {
-      return left;
-    },
-    onEmpty: new ORPCError("INTERNAL_SERVER_ERROR", {
-      cause: new Error("Unknown error"),
-    }),
-    onParallel(left) {
-      return left;
-    },
-  });
+    }
+    return new ORPCError("INTERNAL_SERVER_ERROR", {
+      cause: new Error(`${reason.success.fiberId} got interrupted`),
+    });
+  }
+
+  return new ORPCError("INTERNAL_SERVER_ERROR");
 }
 
 export function createEffectProcedureHandler<
-  TCurrentContext extends Context,
+  TCurrentContext extends ORPCContext,
   TInput,
   TOutput,
   TEffectErrorMap extends EffectErrorMap,
@@ -188,7 +201,7 @@ export function createEffectProcedureHandler<
 }
 
 export function createEffectPipelineMiddleware<
-  TCurrentContext extends Context,
+  TCurrentContext extends ORPCContext,
   TOutput,
   TEffectErrorMap extends EffectErrorMap,
   TRequirementsProvided,
@@ -226,7 +239,7 @@ export function createEffectPipelineMiddleware<
       baseOptions,
       effectErrorMap,
       final: (context) =>
-        withCurrentFiberContext(() =>
+        withCurrentServiceContext(() =>
           opts.next(
             context === opts.context
               ? undefined
@@ -532,7 +545,7 @@ function makeHybridMiddlewareContinuation<TOutput>(options: {
     context: nextContext,
   });
   const effect = Effect.map(
-    withCurrentFiberContext(() => options.final(...options.rest) as any),
+    withCurrentServiceContext(() => options.final(...options.rest) as any),
     toEffectResult,
   ) as Effect.Effect<EffectMiddlewareResult<Context, TOutput>>;
 
@@ -583,7 +596,7 @@ function attachPromiseLikeContinuation(
 }
 
 export function createEffectProviderMiddleware<
-  TCurrentContext extends Context,
+  TCurrentContext extends ORPCContext,
   TInput,
   TEffectErrorMap extends EffectErrorMap,
   TRequirementsProvided,
@@ -616,7 +629,7 @@ export function createEffectProviderMiddleware<
       callEffectCallback(provider, effectOpts),
       (service) =>
         Effect.provideService(
-          withCurrentFiberContext(() => opts.next()),
+          withCurrentServiceContext(() => opts.next()),
           tag,
           service,
         ),
@@ -627,12 +640,12 @@ export function createEffectProviderMiddleware<
 
     if (Exit.isFailure(exit)) throw toORPCErrorFromCause(exit.cause);
 
-    return exit.value;
+    return exit.value as MiddlewareResult<Record<never, never>, any>;
   };
 }
 
 export function createEffectOptionalProviderMiddleware<
-  TCurrentContext extends Context,
+  TCurrentContext extends ORPCContext,
   TInput,
   TEffectErrorMap extends EffectErrorMap,
   TRequirementsProvided,
@@ -665,10 +678,10 @@ export function createEffectOptionalProviderMiddleware<
       callEffectCallback(provider, effectOpts),
       (service) =>
         Option.match(service, {
-          onNone: () => withCurrentFiberContext(() => opts.next()),
+          onNone: () => withCurrentServiceContext(() => opts.next()),
           onSome: (value) =>
             Effect.provideService(
-              withCurrentFiberContext(() => opts.next()),
+              withCurrentServiceContext(() => opts.next()),
               tag,
               value,
             ),
@@ -680,7 +693,7 @@ export function createEffectOptionalProviderMiddleware<
 
     if (Exit.isFailure(exit)) throw toORPCErrorFromCause(exit.cause);
 
-    return exit.value;
+    return exit.value as MiddlewareResult<Record<never, never>, any>;
   };
 }
 
@@ -762,8 +775,8 @@ function isGeneratorFunction(
 export function isEffectMiddleware(
   value: unknown,
 ): value is EffectMiddleware<
-  Context,
-  Context,
+  ORPCContext,
+  ORPCContext,
   unknown,
   unknown,
   EffectErrorMap,
@@ -780,7 +793,7 @@ export function isDecoratedMiddleware(value: unknown): boolean {
 }
 
 function makeEffectOptions<
-  TCurrentContext extends Context,
+  TCurrentContext extends ORPCContext,
   TInput,
   TEffectErrorMap extends EffectErrorMap,
   TMeta extends Meta,
@@ -808,7 +821,7 @@ function makeEffectOptions<
 }
 
 function runEffectPipeline<
-  TCurrentContext extends Context,
+  TCurrentContext extends ORPCContext,
   TInput,
   TOutput,
   TEffectErrorMap extends EffectErrorMap,
@@ -833,7 +846,7 @@ function runEffectPipeline<
   runner: EffectRuntimeRunner<TRequirementsProvided, unknown>;
   steps: readonly EffectPipelineStep[];
 }): Effect.Effect<
-  EffectMiddlewareResult<Context, TOutput>,
+  EffectMiddlewareResult<ORPCContext, TOutput>,
   unknown,
   TRequirementsProvided
 > {
@@ -841,7 +854,7 @@ function runEffectPipeline<
     index: number,
     context: TCurrentContext,
   ): Effect.Effect<
-    EffectMiddlewareResult<Context, TOutput>,
+    EffectMiddlewareResult<ORPCContext, TOutput>,
     unknown,
     TRequirementsProvided
   > => {
@@ -874,12 +887,12 @@ function runEffectPipeline<
       return Effect.provide(run(index + 1, context), step.layer);
     }
 
-    return Effect.flatMap(Effect.getFiberRefs, (fiberRefs) => {
+    return Effect.flatMap(Effect.context<any>(), (services) => {
       const makeThenable = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
         makeThenableEffect(
           effect,
           options.runner as EffectRuntimeRunner<any, unknown>,
-          fiberRefs,
+          services,
           stepOptions.signal,
         ) as Effect.Effect<A, E, R>;
       const nextTracker =
@@ -981,7 +994,7 @@ function createMiddlewareNextTracker<T>(
 }
 
 function resolveEffectMiddlewareContinuation<
-  TContext extends Context,
+  TContext extends ORPCContext,
   TOutput,
   TRequirementsProvided,
 >(options: {
@@ -1029,7 +1042,7 @@ function makeEffectMiddlewareOutput<
   ) => Effect.Effect<A, E, R>,
 ): EffectMiddlewareOutput<TOutput, TEffectErrorMap, TRequirementsProvided> {
   return (value: TOutput) => {
-    const effect = withCurrentFiberContext(() => output(value));
+    const effect = withCurrentServiceContext(() => output(value));
     return makeThenable ? makeThenable(effect) : effect;
   };
 }
@@ -1037,7 +1050,7 @@ function makeEffectMiddlewareOutput<
 function makeThenableEffect<A, E, R>(
   effect: Effect.Effect<A, E, R>,
   runner: EffectRuntimeRunner<any, unknown>,
-  fiberRefs: FiberRefs.FiberRefs,
+  services: import("effect").Context.Context<any>,
   signal: AbortSignal | undefined,
 ): Effect.Effect<A, E, R> {
   if ("then" in effect) {
@@ -1050,7 +1063,7 @@ function makeThenableEffect<A, E, R>(
       onFulfilled: ((value: A) => unknown) | undefined,
       onRejected: ((error: unknown) => unknown) | undefined,
     ) =>
-      runNestedEffect(effect, runner, fiberRefs, signal).then(
+      runNestedEffect(effect, runner, services, signal).then(
         onFulfilled,
         onRejected,
       ),
@@ -1062,37 +1075,26 @@ function makeThenableEffect<A, E, R>(
 async function runNestedEffect<A, E, R>(
   effect: Effect.Effect<A, E, R>,
   runner: EffectRuntimeRunner<any, unknown>,
-  fiberRefs: FiberRefs.FiberRefs,
+  services: import("effect").Context.Context<any>,
   signal: AbortSignal | undefined,
 ): Promise<A> {
-  const exit = await runner.runPromiseExit(withFiberRefs(effect, fiberRefs), {
-    signal,
-  });
+  const exit = await runWithServices(services, () =>
+    runner.runPromiseExit(effect as any, { signal }),
+  );
 
   if (Exit.isFailure(exit)) {
     throw toORPCErrorFromCause(exit.cause);
   }
 
-  return exit.value;
+  return exit.value as A;
 }
 
-function withFiberRefs<A, E, R>(
-  effect: Effect.Effect<A, E, R>,
-  parentFiberRefs: FiberRefs.FiberRefs,
-): Effect.Effect<A, E, R> {
-  return Effect.fiberIdWith((fiberId) =>
-    Effect.flatMap(Effect.getFiberRefs, (fiberRefs) =>
-      Effect.setFiberRefs(
-        FiberRefs.joinAs(fiberRefs, fiberId, parentFiberRefs),
-      ).pipe(Effect.andThen(effect)),
-    ),
-  );
-}
-
-function withCurrentFiberContext<T>(fn: () => Promisable<T>): Effect.Effect<T> {
-  return Effect.flatMap(Effect.getFiberRefs, (fiberRefs) =>
+function withCurrentServiceContext<T, R = never>(
+  fn: () => Promisable<T>,
+): Effect.Effect<T, never, R> {
+  return Effect.flatMap(Effect.context<R>(), (services) =>
     Effect.promise(() =>
-      runWithFiberRefs(fiberRefs, () => Promise.resolve(fn())),
+      runWithServices(services, () => Promise.resolve(fn())),
     ),
   );
 }

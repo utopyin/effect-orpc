@@ -25,7 +25,6 @@ import type {
 } from "@orpc/server";
 import type { MaybeOptionalOptions } from "@orpc/shared";
 import type { Context as EffectContext, Effect, Layer, Option } from "effect";
-import type { YieldWrap } from "effect/Utils";
 
 import type { EffectRuntimeRunner } from "../runtime-source";
 import type {
@@ -153,8 +152,8 @@ export interface EffectProcedureHandlerConfig {
   readonly spanConfig?: EffectSpanConfig;
 }
 
-type EffectTagService<T extends EffectContext.Tag<any, any>> =
-  T extends EffectContext.Tag<any, infer S> ? S : never;
+type EffectTagService<T extends EffectContext.Key<any, any>> =
+  T extends EffectContext.Key<any, infer S> ? S : never;
 
 type EffectOperationError<TEffectErrorMap extends EffectErrorMap> =
   | EffectErrorMapToUnion<TEffectErrorMap>
@@ -164,16 +163,10 @@ type EffectCallbackGenerator<
   TReturn,
   TEffectErrorMap extends EffectErrorMap,
   TRequirementsProvided,
-> = Generator<
-  YieldWrap<
-    Effect.Effect<
-      unknown,
-      EffectOperationError<TEffectErrorMap>,
-      TRequirementsProvided
-    >
-  >,
+> = Effect.fn.Return<
   TReturn,
-  never
+  EffectOperationError<TEffectErrorMap>,
+  TRequirementsProvided
 >;
 
 export type EffectProvider<
@@ -182,7 +175,7 @@ export type EffectProvider<
   TEffectErrorMap extends EffectErrorMap,
   TRequirementsProvided,
   TMeta extends Meta,
-  TTag extends EffectContext.Tag<any, any>,
+  TTag extends EffectContext.Key<any, any>,
 > = (
   opt: ProcedureHandlerOptions<
     TCurrentContext,
@@ -208,7 +201,7 @@ export type EffectOptionalProvider<
   TEffectErrorMap extends EffectErrorMap,
   TRequirementsProvided,
   TMeta extends Meta,
-  TTag extends EffectContext.Tag<any, any>,
+  TTag extends EffectContext.Key<any, any>,
 > = (
   opt: ProcedureHandlerOptions<
     TCurrentContext,
@@ -429,13 +422,13 @@ export type EffectMiddleware<
 
 type EffectProvideStep = {
   readonly _tag: "provide";
-  readonly tag: EffectContext.Tag<any, any>;
+  readonly tag: EffectContext.Key<any, any>;
   readonly provider: EffectProvider<any, any, any, any, any, any>;
 };
 
 type EffectProvideOptionalStep = {
   readonly _tag: "provideOptional";
-  readonly tag: EffectContext.Tag<any, any>;
+  readonly tag: EffectContext.Key<any, any>;
   readonly provider: EffectOptionalProvider<any, any, any, any, any, any>;
 };
 

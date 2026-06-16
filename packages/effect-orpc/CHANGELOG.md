@@ -1,16 +1,24 @@
 # effect-orpc
 
-## 0.4.0
+## 1.0.0-effect-v4.7
 
 ### Minor Changes
 
-- 070f9aa: Add `eos`, the default Effect-aware builder for the `eos.provide(AppLive)` workflow. `ManagedRuntime` is now used only when you pass one explicitly, so applications can use Layer-provided builders by default and opt into a user-owned runtime when they need to control Layer acquisition and release from their application lifecycle.
+- 3ccdef0: Support Effect-returning callbacks everywhere Effect-native callbacks are accepted.
 
-## 0.3.0
+  Handlers, request-scoped providers, optional providers, `.use(...)`, and reusable `.middleware(...)` now accept `Effect.fn(...)` and functions returning `Effect.gen(...)` in addition to existing generator callbacks. Native oRPC middleware behavior is preserved, including `return next(...)` and guard-only middleware.
+
+  Named user spans from `Effect.fn("name")` and `Effect.withSpan(...)` are preserved inside the automatic procedure span.
+
+### Patch Changes
+
+- 0c199ee: Support Effect 4.0.0-beta.83.
+
+## 1.0.0-effect-v4.6
 
 ### Minor Changes
 
-- 44e7b5e: Add Layer-based service provisioning: `makeEffectORPC(...)` and `implementEffect(...)` now accept a `Layer` in addition to `ManagedRuntime`. Builders can also start without a runtime and add base services later with `.provide(layer)`.
+- 9f251eb: Add Layer-based service provisioning: `makeEffectORPC(...)` and `implementEffect(...)` now accept a `Layer` in addition to `ManagedRuntime`. Builders can also start without a runtime and add base services later with `.provide(layer)`.
 
   Add request-scoped Effect providers with `.provide(tag, provider)` and `.provideOptional(...)`, allowing procedures and downstream Effect middleware/handlers to access services derived from the current request context.
 
@@ -22,11 +30,44 @@
 
   Extend the existing Node FiberRef bridge to preserve FiberRefs across split Effect groups, including side-effect-only `effect-orpc/node` bridge installation.
 
-## 0.2.2
+- 070f9aa: Add `eos`, the default Effect-aware builder for the `eos.provide(AppLive)` workflow. `ManagedRuntime` is now used only when you pass one explicitly, so applications can use Layer-provided builders by default and opt into a user-owned runtime when they need to control Layer acquisition and release from their application lifecycle.
+
+## 1.0.0-effect-v4.5
 
 ### Patch Changes
 
-- 1e2d2c7: Add JSDocs back
+- 2c5477e: Support latest effect-v4 beta version to date (4.0.0-beta.65)
+- Port the proxy-based Effect builder and procedure compatibility layer to the Effect v4 prerelease line, preserving upstream oRPC parity while keeping Effect v4 runtime, error, and request-context behavior.
+
+## 1.0.0-effect-v4.4
+
+### Patch Changes
+
+- 19b48ed: Support latest effect-v4 version (4.0.0-beta.57)
+
+## 1.0.0-effect-v4.3
+
+### Patch Changes
+
+- b1d95d7: Add README
+
+## 1.0.0-effect-v4.2
+
+### Patch Changes
+
+- ed5bc70: Sync readme from root to package so that it gets published on NPM
+
+## 1.0.0-effect-v4.1
+
+### Patch Changes
+
+- ac41539: docs: remove duplicate request-scoped context section
+
+## 1.0.0-effect-v4.0
+
+### Major Changes
+
+- 045df4a: migrate to effect-v4 (effect-smol)
 
 ## 0.2.1
 

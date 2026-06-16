@@ -1,41 +1,107 @@
 /**
+ * Utilities for recurring calendar schedules written as cron expressions or
+ * explicit field constraints. A `Cron` value stores allowed seconds, minutes,
+ * hours, days of month, months, weekdays, and an optional time zone. The module
+ * can create or parse schedules, compare them, test whether a date matches, and
+ * find previous or next scheduled occurrences.
+ *
  * @since 2.0.0
  */
-import * as Arr from "./Array.js"
-import * as Data from "./Data.js"
-import type * as DateTime from "./DateTime.js"
-import * as Either from "./Either.js"
-import * as Equal from "./Equal.js"
-import * as equivalence from "./Equivalence.js"
-import { constVoid, dual, identity, pipe } from "./Function.js"
-import * as Hash from "./Hash.js"
-import { format, type Inspectable, NodeInspectSymbol } from "./Inspectable.js"
-import * as dateTime from "./internal/dateTime.js"
-import * as N from "./Number.js"
-import * as Option from "./Option.js"
-import { type Pipeable, pipeArguments } from "./Pipeable.js"
-import { hasProperty } from "./Predicate.js"
-import * as String from "./String.js"
-import type { Mutable } from "./Types.js"
+import * as Arr from "./Array.ts"
+import * as Data from "./Data.ts"
+import type * as DateTime from "./DateTime.ts"
+import * as Equal from "./Equal.ts"
+import * as Equ from "./Equivalence.ts"
+import { format } from "./Formatter.ts"
+import { constVoid, dual, pipe } from "./Function.ts"
+import * as Hash from "./Hash.ts"
+import { type Inspectable, NodeInspectSymbol } from "./Inspectable.ts"
+import * as dateTime from "./internal/dateTime.ts"
+import * as N from "./Number.ts"
+import * as Option from "./Option.ts"
+import { type Pipeable, pipeArguments } from "./Pipeable.ts"
+import { hasProperty } from "./Predicate.ts"
+import * as Result from "./Result.ts"
+import * as String from "./String.ts"
+import type { Mutable } from "./Types.ts"
+
+const TypeId = "~effect/time/Cron"
 
 /**
- * @since 2.0.0
- * @category symbols
- */
-export const TypeId: unique symbol = Symbol.for("effect/Cron")
-
-/**
- * @since 2.0.0
- * @category symbol
- */
-export type TypeId = typeof TypeId
-
-/**
- * @since 2.0.0
+ * Represents a cron schedule with time constraints and timezone information.
+ *
+ * **When to use**
+ *
+ * Use to represent a recurring calendar schedule that can be matched against
+ * dates or used to compute scheduled occurrences.
+ *
+ * **Details**
+ *
+ * A `Cron` instance defines when a scheduled task should run, supporting
+ * seconds, minutes, hours, days, months, and weekday constraints. It also
+ * supports timezone-aware scheduling.
+ *
+ * **Example** (Creating a cron schedule)
+ *
+ * ```ts
+ * import { Cron } from "effect"
+ *
+ * // Create a cron that runs at 9 AM on weekdays
+ * const weekdayMorning = Cron.make({
+ *   minutes: [0],
+ *   hours: [9],
+ *   days: [
+ *     1,
+ *     2,
+ *     3,
+ *     4,
+ *     5,
+ *     6,
+ *     7,
+ *     8,
+ *     9,
+ *     10,
+ *     11,
+ *     12,
+ *     13,
+ *     14,
+ *     15,
+ *     16,
+ *     17,
+ *     18,
+ *     19,
+ *     20,
+ *     21,
+ *     22,
+ *     23,
+ *     24,
+ *     25,
+ *     26,
+ *     27,
+ *     28,
+ *     29,
+ *     30,
+ *     31
+ *   ],
+ *   months: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+ *   weekdays: [1, 2, 3, 4, 5] // Monday to Friday
+ * })
+ *
+ * // Check if a date matches the schedule
+ * const matches = Cron.match(weekdayMorning, new Date("2023-06-05T09:00:00"))
+ * console.log(matches) // true if it's 9 AM on a weekday
+ * ```
+ *
+ * @see {@link make} for creating a schedule from explicit field constraints
+ * @see {@link parse} for creating a schedule from a cron expression string
+ * @see {@link match} for testing a date against a schedule
+ * @see {@link next} for finding the next scheduled occurrence
+ *
  * @category models
+ * @since 2.0.0
  */
 export interface Cron extends Pipeable, Equal.Equal, Inspectable {
-  readonly [TypeId]: TypeId
+  readonly [TypeId]: typeof TypeId
   readonly tz: Option.Option<DateTime.TimeZone>
   readonly seconds: ReadonlySet<number>
   readonly minutes: ReadonlySet<number>
@@ -81,6 +147,18 @@ export interface Cron extends Pipeable, Equal.Equal, Inspectable {
   }
 }
 
+function toPojo(cron: Cron): Record<string, unknown> {
+  return {
+    tz: cron.tz,
+    seconds: Arr.fromIterable(cron.seconds),
+    minutes: Arr.fromIterable(cron.minutes),
+    hours: Arr.fromIterable(cron.hours),
+    days: Arr.fromIterable(cron.days),
+    months: Arr.fromIterable(cron.months),
+    weekdays: Arr.fromIterable(cron.weekdays)
+  }
+}
+
 const CronProto = {
   [TypeId]: TypeId,
   [Equal.symbol](this: Cron, that: unknown) {
@@ -94,16 +172,11 @@ const CronProto = {
       Hash.combine(Hash.array(Arr.fromIterable(this.hours))),
       Hash.combine(Hash.array(Arr.fromIterable(this.days))),
       Hash.combine(Hash.array(Arr.fromIterable(this.months))),
-      Hash.combine(Hash.array(Arr.fromIterable(this.weekdays))),
-      Hash.cached(this)
+      Hash.combine(Hash.array(Arr.fromIterable(this.weekdays)))
     )
   },
-  toString(this: Cron) {
-    return format(this.toJSON())
-  },
-  toJSON(this: Cron) {
+  toObject(this: Cron) {
     return {
-      _id: "Cron",
       tz: this.tz,
       seconds: Arr.fromIterable(this.seconds),
       minutes: Arr.fromIterable(this.minutes),
@@ -112,6 +185,14 @@ const CronProto = {
       months: Arr.fromIterable(this.months),
       weekdays: Arr.fromIterable(this.weekdays)
     }
+  },
+  toString(this: Cron) {
+    return `Cron(${format(toPojo(this))})`
+  },
+  toJSON(this: Cron) {
+    const out = toPojo(this)
+    out["_id"] = "Cron"
+    return out
   },
   [NodeInspectSymbol](this: Cron) {
     return this.toJSON()
@@ -122,18 +203,149 @@ const CronProto = {
 }
 
 /**
- * Checks if a given value is a `Cron` instance.
+ * Checks whether a given value is a Cron instance.
  *
- * @since 2.0.0
+ * **When to use**
+ *
+ * Use to narrow an unknown value before treating it as a `Cron` schedule.
+ *
+ * **Details**
+ *
+ * This function is a type guard that determines whether the provided
+ * value is a valid Cron instance by checking for the presence of the
+ * Cron type identifier.
+ *
+ * **Example** (Checking cron values)
+ *
+ * ```ts
+ * import { Cron } from "effect"
+ *
+ * const cron = Cron.make({
+ *   minutes: [0],
+ *   hours: [9],
+ *   days: [1, 15],
+ *   months: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+ *   weekdays: [1, 2, 3, 4, 5]
+ * })
+ *
+ * console.log(Cron.isCron(cron)) // true
+ * console.log(Cron.isCron({})) // false
+ * console.log(Cron.isCron("not a cron")) // false
+ * ```
+ *
+ * @see {@link make} for constructing a `Cron` value directly
+ * @see {@link parse} for constructing a `Cron` value from a string
+ *
  * @category guards
+ * @since 2.0.0
  */
 export const isCron = (u: unknown): u is Cron => hasProperty(u, TypeId)
 
 /**
- * Creates a `Cron` instance.
+ * Creates a Cron instance from time constraints.
  *
- * @since 2.0.0
+ * **When to use**
+ *
+ * Use to build a cron schedule from explicit sets of allowed time-field values.
+ *
+ * **Details**
+ *
+ * Constructs a cron schedule by specifying which seconds, minutes, hours,
+ * days, months, and weekdays the schedule should match. Empty arrays mean
+ * "match all" for that time unit.
+ *
+ * **Example** (Creating schedules from constraints)
+ *
+ * ```ts
+ * import { Cron } from "effect"
+ *
+ * // Every day at midnight
+ * const midnight = Cron.make({
+ *   minutes: [0],
+ *   hours: [0],
+ *   days: [
+ *     1,
+ *     2,
+ *     3,
+ *     4,
+ *     5,
+ *     6,
+ *     7,
+ *     8,
+ *     9,
+ *     10,
+ *     11,
+ *     12,
+ *     13,
+ *     14,
+ *     15,
+ *     16,
+ *     17,
+ *     18,
+ *     19,
+ *     20,
+ *     21,
+ *     22,
+ *     23,
+ *     24,
+ *     25,
+ *     26,
+ *     27,
+ *     28,
+ *     29,
+ *     30,
+ *     31
+ *   ],
+ *   months: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+ *   weekdays: [0, 1, 2, 3, 4, 5, 6]
+ * })
+ *
+ * // Every 15 minutes during business hours on weekdays
+ * const businessHours = Cron.make({
+ *   minutes: [0, 15, 30, 45],
+ *   hours: [9, 10, 11, 12, 13, 14, 15, 16, 17],
+ *   days: [
+ *     1,
+ *     2,
+ *     3,
+ *     4,
+ *     5,
+ *     6,
+ *     7,
+ *     8,
+ *     9,
+ *     10,
+ *     11,
+ *     12,
+ *     13,
+ *     14,
+ *     15,
+ *     16,
+ *     17,
+ *     18,
+ *     19,
+ *     20,
+ *     21,
+ *     22,
+ *     23,
+ *     24,
+ *     25,
+ *     26,
+ *     27,
+ *     28,
+ *     29,
+ *     30,
+ *     31
+ *   ],
+ *   months: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+ *   weekdays: [1, 2, 3, 4, 5] // Monday to Friday
+ * })
+ * ```
+ *
+ * @see {@link parse} for building a schedule from a cron expression string
+ *
  * @category constructors
+ * @since 2.0.0
  */
 export const make = (values: {
   readonly seconds?: Iterable<number> | undefined
@@ -151,7 +363,7 @@ export const make = (values: {
   o.days = new Set(Arr.sort(values.days, N.Order))
   o.months = new Set(Arr.sort(values.months, N.Order))
   o.weekdays = new Set(Arr.sort(values.weekdays, N.Order))
-  o.tz = Option.fromNullable(values.tz)
+  o.tz = Option.fromUndefinedOr(values.tz)
 
   const seconds = Array.from(o.seconds)
   const minutes = Array.from(o.minutes)
@@ -232,73 +444,128 @@ const lookupTable = (
   return result
 }
 
-/**
- * @since 2.0.0
- * @category symbol
- */
-export const ParseErrorTypeId: unique symbol = Symbol.for("effect/Cron/errors/ParseError")
+const CronParseErrorTypeId = "~effect/time/Cron/CronParseError"
 
 /**
- * @since 2.0.0
- * @category symbols
- */
-export type ParseErrorTypeId = typeof ParseErrorTypeId
-
-/**
- * Represents a checked exception which occurs when decoding fails.
+ * Represents an error that occurs when parsing a cron expression fails.
  *
- * @since 2.0.0
+ * **When to use**
+ *
+ * Use to handle invalid cron expression failures returned by `parse`.
+ *
+ * **Details**
+ *
+ * This error provides information about what went wrong during parsing,
+ * including the error message and optionally the input that caused the error.
+ *
+ * **Example** (Handling cron parse failures)
+ *
+ * ```ts
+ * import { Cron, Result } from "effect"
+ *
+ * const result = Cron.parse("invalid expression")
+ * if (Result.isFailure(result)) {
+ *   const error: Cron.CronParseError = result.failure
+ *   console.log(error.message) // "Invalid number of segments in cron expression"
+ *   console.log(error.input) // "invalid expression"
+ * }
+ * ```
+ *
+ * @see {@link parse} for the parser that returns this error in `Result.fail`
+ * @see {@link isCronParseError} for narrowing unknown values to this error type
+ *
  * @category models
+ * @since 4.0.0
  */
-export class ParseError extends Data.TaggedError("CronParseError")<{
+export class CronParseError extends Data.TaggedError("CronParseError")<{
   readonly message: string
   readonly input?: string
 }> {
-  /**
-   * @since 2.0.0
-   */
-  readonly [ParseErrorTypeId] = ParseErrorTypeId
+  readonly [CronParseErrorTypeId]: typeof CronParseErrorTypeId = CronParseErrorTypeId
 }
 
 /**
- * Returns `true` if the specified value is an `ParseError`, `false` otherwise.
+ * Checks whether a given value is a CronParseError instance.
  *
- * @since 2.0.0
- * @category guards
- */
-export const isParseError = (u: unknown): u is ParseError => hasProperty(u, ParseErrorTypeId)
-
-/**
- * Parses a cron expression into a `Cron` instance.
+ * **When to use**
  *
- * @example
+ * Use to narrow an unknown failure before handling it as a cron parse error.
+ *
+ * **Details**
+ *
+ * This function is a type guard that determines whether the provided
+ * value is a CronParseError by checking for the presence of the
+ * CronParseError type identifier.
+ *
+ * **Example** (Checking cron parse errors)
+ *
  * ```ts
- * import * as assert from "node:assert"
- * import { Cron, Either } from "effect"
+ * import { Cron, Result } from "effect"
  *
- * // At 04:00 on every day-of-month from 8 through 14.
- * assert.deepStrictEqual(Cron.parse("0 0 4 8-14 * *"), Either.right(Cron.make({
- *   seconds: [0],
- *   minutes: [0],
- *   hours: [4],
- *   days: [8, 9, 10, 11, 12, 13, 14],
- *   months: [],
- *   weekdays: []
- * })))
+ * const result = Cron.parse("invalid cron expression")
+ * if (Result.isFailure(result)) {
+ *   const error = result.failure
+ *   console.log(Cron.isCronParseError(error)) // true
+ * }
+ *
+ * console.log(Cron.isCronParseError(new Error("regular error"))) // false
+ * console.log(Cron.isCronParseError("not an error")) // false
  * ```
  *
- * @since 2.0.0
- * @category constructors
+ * @see {@link CronParseError} for the parse error type
+ * @see {@link parse} for producing `CronParseError` values on invalid input
+ *
+ * @category guards
+ * @since 4.0.0
  */
-export const parse = (cron: string, tz?: DateTime.TimeZone | string): Either.Either<Cron, ParseError> => {
+export const isCronParseError = (u: unknown): u is CronParseError => hasProperty(u, CronParseErrorTypeId)
+
+/**
+ * Parses a cron expression safely into a `Cron` instance, returning a `Result`
+ * instead of throwing.
+ *
+ * **When to use**
+ *
+ * Use to parse cron expressions from configuration or user input while handling
+ * invalid input as a `Result`.
+ *
+ * **Details**
+ *
+ * The expression may contain five fields, where seconds default to `0`, or six
+ * fields including seconds. Fields support `*`, comma-separated values, ranges,
+ * steps, and month or weekday aliases. Invalid expressions fail with
+ * `CronParseError`.
+ *
+ * **Example** (Parsing cron expressions)
+ *
+ * ```ts
+ * import { Cron, Result } from "effect"
+ * import * as assert from "node:assert"
+ *
+ * // At 04:00 on every day-of-month from 8 through 14.
+ * assert.deepStrictEqual(
+ *   Cron.parse("0 0 4 8-14 * *"),
+ *   Result.succeed(Cron.make({
+ *     seconds: [0],
+ *     minutes: [0],
+ *     hours: [4],
+ *     days: [8, 9, 10, 11, 12, 13, 14],
+ *     months: [],
+ *     weekdays: []
+ *   }))
+ * )
+ * ```
+ *
+ * @see {@link parseUnsafe} for throwing on invalid cron expressions
+ * @see {@link make} for constructing a schedule from explicit field constraints
+ *
+ * @category constructors
+ * @since 2.0.0
+ */
+export const parse = (cron: string, tz?: DateTime.TimeZone | string): Result.Result<Cron, CronParseError> => {
   const segments = cron.split(" ").filter(String.isNonEmpty)
   if (segments.length !== 5 && segments.length !== 6) {
-    return Either.left(
-      new ParseError({
-        message: `Invalid number of segments in cron expression`,
-        input: cron
-      })
-    )
+    return Result.fail(new CronParseError({ message: `Invalid number of segments in cron expression`, input: cron }))
   }
 
   if (segments.length === 5) {
@@ -307,14 +574,13 @@ export const parse = (cron: string, tz?: DateTime.TimeZone | string): Either.Eit
 
   const [seconds, minutes, hours, days, months, weekdays] = segments
   const zone = tz === undefined || dateTime.isTimeZone(tz) ?
-    Either.right(tz) :
-    Either.fromOption(dateTime.zoneFromString(tz), () =>
-      new ParseError({
-        message: `Invalid time zone in cron expression`,
-        input: tz
-      }))
+    Result.succeed(tz) :
+    Result.fromOption(
+      dateTime.zoneFromString(tz),
+      () => new CronParseError({ message: `Invalid time zone in cron expression`, input: tz })
+    )
 
-  return Either.all({
+  return Result.all({
     tz: zone,
     seconds: parseSegment(seconds, secondOptions),
     minutes: parseSegment(minutes, minuteOptions),
@@ -322,83 +588,89 @@ export const parse = (cron: string, tz?: DateTime.TimeZone | string): Either.Eit
     days: parseSegment(days, dayOptions),
     months: parseSegment(months, monthOptions),
     weekdays: parseSegment(weekdays, weekdayOptions)
-  }).pipe(Either.map(make))
+  }).pipe(Result.map(make))
 }
 
 /**
- * Parses a cron expression into a `Cron` instance.
+ * Parses a cron expression into a `Cron` instance, throwing on failure.
  *
- * **Details**
+ * **When to use**
  *
- * This function takes a cron expression as a string and attempts to parse it
- * into a `Cron` instance. If the expression is valid, the resulting `Cron`
- * instance will represent the schedule defined by the cron expression.
+ * Use when you expect the input to be valid and want to avoid handling the
+ * `Result` type.
  *
- * If the expression is invalid, the function throws a `ParseError`.
+ * **Example** (Parsing cron expressions unsafely)
  *
- * You can optionally provide a time zone (`tz`) to interpret the cron
- * expression in a specific time zone. If no time zone is provided, the cron
- * expression will use the default time zone.
- *
- * @example
  * ```ts
  * import { Cron } from "effect"
  *
- * // At 04:00 on every day-of-month from 8 through 14.
- * console.log(Cron.unsafeParse("0 4 8-14 * *"))
- * // Output:
- * // {
- * //   _id: 'Cron',
- * //   tz: { _id: 'Option', _tag: 'None' },
- * //   seconds: [ 0 ],
- * //   minutes: [ 0 ],
- * //   hours: [ 4 ],
- * //   days: [
- * //      8,  9, 10, 11,
- * //     12, 13, 14
- * //   ],
- * //   months: [],
- * //   weekdays: []
- * // }
+ * // At 04:00 on every day-of-month from 8 through 14
+ * const cron = Cron.parseUnsafe("0 0 4 8-14 * *")
+ *
+ * // With timezone
+ * const cronWithTz = Cron.parseUnsafe("0 0 9 * * *", "America/New_York")
+ *
+ * // This would throw an error
+ * // const invalid = Cron.parseUnsafe("invalid expression")
  * ```
  *
- * @since 2.0.0
  * @category constructors
+ * @since 4.0.0
  */
-export const unsafeParse = (cron: string, tz?: DateTime.TimeZone | string): Cron =>
-  Either.getOrThrowWith(parse(cron, tz), identity)
+export const parseUnsafe = (cron: string, tz?: DateTime.TimeZone | string): Cron => Result.getOrThrow(parse(cron, tz))
 
 /**
- * Checks if a given `Date` falls within an active `Cron` time window.
+ * Returns `true` when a date/time matches a `Cron` schedule.
  *
- * @example
+ * **When to use**
+ *
+ * Use to test whether a specific date/time satisfies a cron schedule.
+ *
+ * **Details**
+ *
+ * Seconds, minutes, hours, months, and the optional timezone are checked
+ * directly. For day constraints, an empty `days` or `weekdays` set means that
+ * field matches every value; when both sets are non-empty, a date matches if
+ * either the day-of-month or weekday matches.
+ *
+ * **Example** (Matching dates against a schedule)
+ *
  * ```ts
- * import * as assert from "node:assert"
- * import { Cron, Either } from "effect"
+ * import { Cron, Result } from "effect"
  *
- * const cron = Either.getOrThrow(Cron.parse("0 4 8-14 * *"))
- * assert.deepStrictEqual(Cron.match(cron, new Date("2021-01-08 04:00:00")), true)
- * assert.deepStrictEqual(Cron.match(cron, new Date("2021-01-08 05:00:00")), false)
+ * const cron = Result.getOrThrow(Cron.parse("0 0 4 8-14 * *"))
+ *
+ * // Check if specific dates match
+ * const matches1 = Cron.match(cron, new Date("2021-01-08T04:00:00Z"))
+ * console.log(matches1) // true - 4 AM on the 8th
+ *
+ * const matches2 = Cron.match(cron, new Date("2021-01-08T05:00:00Z"))
+ * console.log(matches2) // false - wrong hour
+ *
+ * const matches3 = Cron.match(cron, new Date("2021-01-07T04:00:00Z"))
+ * console.log(matches3) // false - wrong day
  * ```
  *
- * @throws `IllegalArgumentException` if the given `DateTime.Input` is invalid.
+ * @see {@link next} for finding the next matching date/time
+ * @see {@link prev} for finding the previous matching date/time
  *
+ * @category predicates
  * @since 2.0.0
  */
 export const match = (cron: Cron, date: DateTime.DateTime.Input): boolean => {
-  const parts = dateTime.unsafeMakeZoned(date, {
+  const parts = dateTime.makeZonedUnsafe(date, {
     timeZone: Option.getOrUndefined(cron.tz)
   }).pipe(dateTime.toParts)
 
-  if (cron.seconds.size !== 0 && !cron.seconds.has(parts.seconds)) {
+  if (cron.seconds.size !== 0 && !cron.seconds.has(parts.second)) {
     return false
   }
 
-  if (cron.minutes.size !== 0 && !cron.minutes.has(parts.minutes)) {
+  if (cron.minutes.size !== 0 && !cron.minutes.has(parts.minute)) {
     return false
   }
 
-  if (cron.hours.size !== 0 && !cron.hours.has(parts.hours)) {
+  if (cron.hours.size !== 0 && !cron.hours.has(parts.hour)) {
     return false
   }
 
@@ -425,80 +697,98 @@ const daysInMonth = (date: Date): number =>
   new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0)).getUTCDate()
 
 /**
- * Returns the next run `Date` for the given `Cron` instance.
+ * Returns the next scheduled date/time for the given Cron instance.
  *
- * Uses the current time as a starting point if no value is provided for `startFrom`.
+ * **When to use**
  *
- * @example
+ * Use to find the next occurrence of a cron schedule after a specific date/time
+ * or after the current time.
+ *
+ * **Details**
+ *
+ * Searches for the next date and time when the cron schedule should trigger,
+ * starting after the specified date/time or after the current time when no
+ * date is provided.
+ *
+ * **Example** (Finding the next occurrence)
+ *
  * ```ts
- * import * as assert from "node:assert"
- * import { Cron, Either } from "effect"
+ * import { Cron, Result } from "effect"
  *
- * const after = new Date("2021-01-01 00:00:00")
- * const cron = Either.getOrThrow(Cron.parse("0 4 8-14 * *"))
- * assert.deepStrictEqual(Cron.next(cron, after), new Date("2021-01-08 04:00:00"))
+ * const cron = Result.getOrThrow(Cron.parse("0 0 4 8-14 * *"))
+ *
+ * // Get next run after a specific date
+ * const after = new Date("2021-01-01T00:00:00Z")
+ * const nextRun = Cron.next(cron, after)
+ * console.log(nextRun) // 2021-01-08T04:00:00.000Z
+ *
+ * // Get next run from current time
+ * const nextFromNow = Cron.next(cron)
+ * console.log(nextFromNow) // Next occurrence from now
  * ```
  *
- * @throws `IllegalArgumentException` if the given `DateTime.Input` is invalid.
- * @throws `Error` if the next run date cannot be found within 10,000 iterations.
+ * @see {@link prev} for finding the previous scheduled occurrence
+ * @see {@link sequence} for iterating future scheduled occurrences
  *
+ * @category getters
  * @since 2.0.0
  */
-export const next = (cron: Cron, startFrom?: DateTime.DateTime.Input): Date => {
-  return stepCron(cron, startFrom, "next")
+export const next = (cron: Cron, now?: DateTime.DateTime.Input): Date => {
+  return stepCron(cron, now, "next")
 }
 
 /**
- * Returns the previous run `Date` for the given `Cron` instance.
+ * Returns the previous scheduled date/time for the given Cron instance.
  *
- * Uses the current time as a starting point if no value is provided for `startFrom`.
+ * **When to use**
  *
- * @example
- * ```ts
- * import * as assert from "node:assert"
- * import { Cron, Either } from "effect"
+ * Use to find the most recent occurrence of a cron schedule before a specific
+ * date/time or before the current time.
  *
- * const before = new Date("2021-01-15 00:00:00")
- * const cron = Either.getOrThrow(Cron.parse("0 4 8-14 * *"))
- * assert.deepStrictEqual(Cron.prev(cron, before), new Date("2021-01-14 04:00:00"))
- * ```
+ * **Details**
  *
- * @throws `IllegalArgumentException` if the given `DateTime.Input` is invalid.
- * @throws `Error` if the previous run date cannot be found within 10,000 iterations.
+ * When no date/time is provided, the search starts from the current time.
  *
+ * **Gotchas**
+ *
+ * The search is strict: if the supplied date/time already matches the schedule,
+ * the result is the earlier occurrence.
+ *
+ * @see {@link next} for finding the next scheduled occurrence
+ *
+ * @category getters
  * @since 3.20.0
  */
-export const prev = (cron: Cron, startFrom?: DateTime.DateTime.Input): Date => {
-  return stepCron(cron, startFrom, "prev")
+export const prev = (cron: Cron, now?: DateTime.DateTime.Input): Date => {
+  return stepCron(cron, now, "prev")
 }
 
-/** @internal */
-const stepCron = (cron: Cron, startFrom: DateTime.DateTime.Input | undefined, direction: "next" | "prev"): Date => {
+const stepCron = (cron: Cron, now: DateTime.DateTime.Input | undefined, direction: "next" | "prev"): Date => {
   const tz = Option.getOrUndefined(cron.tz)
-  const zoned = dateTime.unsafeMakeZoned(startFrom ?? new Date(), {
+  const zoned = dateTime.makeZonedUnsafe(now ?? new Date(), {
     timeZone: tz
   })
 
-  const prev = direction === "prev"
-  const tick = prev ? -1 : 1
+  const reverse = direction === "prev"
+  const tick = reverse ? -1 : 1
   const table = cron[direction]
-  const boundary = prev ? cron.last : cron.first
+  const boundary = reverse ? cron.last : cron.first
 
-  const needsStep = prev
-    ? (next: number, current: number) => next < current
-    : (next: number, current: number) => next > current
+  const needsStep = reverse ?
+    (next: number, current: number) => next < current :
+    (next: number, current: number) => next > current
 
   const utc = tz !== undefined && dateTime.isTimeZoneNamed(tz) && tz.id === "UTC"
   const adjustDst = utc ? constVoid : (current: Date) => {
-    const adjusted = dateTime.unsafeMakeZoned(current, {
+    const adjusted = dateTime.makeZonedUnsafe(current, {
       timeZone: zoned.zone,
       adjustForTimeZone: true,
-      disambiguation: prev ? "later" : undefined
+      disambiguation: reverse ? "later" : undefined
     }).pipe(dateTime.toDate)
 
     const drift = current.getTime() - adjusted.getTime()
-    if (prev ? drift !== 0 : drift > 0) {
-      current.setTime(adjusted.getTime())
+    if (reverse ? drift !== 0 : drift > 0) {
+      current.setTime(reverse ? adjusted.getTime() : current.getTime() + drift)
     }
   }
 
@@ -553,33 +843,27 @@ const stepCron = (cron: Cron, startFrom: DateTime.DateTime.Input | undefined, di
       }
 
       if (cron.weekdays.size !== 0 || cron.days.size !== 0) {
-        let a: number = prev ? -Infinity : Infinity
-        let b: number = prev ? -Infinity : Infinity
+        let a: number = reverse ? -Infinity : Infinity
+        let b: number = reverse ? -Infinity : Infinity
 
         if (cron.weekdays.size !== 0) {
           const currentWeekday = current.getUTCDay()
           const nextWeekday = table.weekday[currentWeekday]
           if (nextWeekday === undefined) {
-            a = prev
-              ? currentWeekday - 7 + boundary.weekday
-              : 7 - currentWeekday + boundary.weekday
+            a = reverse ?
+              currentWeekday - 7 + boundary.weekday :
+              7 - currentWeekday + boundary.weekday
           } else {
             a = nextWeekday - currentWeekday
           }
         }
 
-        // Only check day-of-month if weekday constraint not already satisfied (they're OR'd)
         if (cron.days.size !== 0 && a !== 0) {
           const currentDay = current.getUTCDate()
           const nextDay = table.day[currentDay]
           if (nextDay === undefined) {
-            if (prev) {
-              // When wrapping to previous month, calculate days back:
-              // Current day offset + gap from end of prev month to target day
-              // Example: June 3 → May 20 with boundary.day=20: -(3 + (31 - 20)) = -14
-              const prevMonthDays = daysInMonth(
-                new Date(Date.UTC(current.getUTCFullYear(), current.getUTCMonth(), 0))
-              )
+            if (reverse) {
+              const prevMonthDays = daysInMonth(new Date(Date.UTC(current.getUTCFullYear(), current.getUTCMonth(), 0)))
               b = -(currentDay + (prevMonthDays - boundary.day))
             } else {
               b = daysInMonth(current) - currentDay + boundary.day
@@ -589,7 +873,7 @@ const stepCron = (cron: Cron, startFrom: DateTime.DateTime.Input | undefined, di
           }
         }
 
-        const addDays = prev ? Math.max(a, b) : Math.min(a, b)
+        const addDays = reverse ? Math.max(a, b) : Math.min(a, b)
         if (addDays !== 0) {
           current.setUTCDate(current.getUTCDate() + addDays)
           current.setUTCHours(boundary.hour, boundary.minute, boundary.second)
@@ -605,7 +889,7 @@ const stepCron = (cron: Cron, startFrom: DateTime.DateTime.Input | undefined, di
           if (cron.days.size !== 0) {
             return boundary.day
           }
-          const maxDayInMonth = daysInMonth(new Date(Date.UTC(current.getUTCFullYear(), targetMonthIndex, 1)))
+          const maxDayInMonth = daysInMonth(new Date(Date.UTC(current.getUTCFullYear(), targetMonthIndex + 1, 0)))
           return Math.min(boundary.day, maxDayInMonth)
         }
         if (nextMonth === undefined) {
@@ -627,40 +911,95 @@ const stepCron = (cron: Cron, startFrom: DateTime.DateTime.Input | undefined, di
       return
     }
 
-    throw new Error("Unable to find next cron date")
+    throw new Error("Unable to find " + direction + " cron date")
   })
 
   return dateTime.toDateUtc(result)
 }
 
 /**
- * Returns an `IterableIterator` which yields the sequence of `Date`s that match the `Cron` instance.
+ * Returns an infinite iterator that yields dates matching the Cron schedule.
  *
+ * **When to use**
+ *
+ * Use to lazily iterate future occurrences of a cron schedule.
+ *
+ * **Details**
+ *
+ * The iterator generates an infinite sequence of dates when the cron schedule
+ * should trigger, starting after the specified date/time or after the current
+ * time when no date is provided.
+ *
+ * **Example** (Iterating scheduled occurrences)
+ *
+ * ```ts
+ * import { Cron, Result } from "effect"
+ *
+ * const cron = Result.getOrThrow(Cron.parse("0 0 9 * * 1-5")) // 9 AM weekdays
+ *
+ * // Get first 5 occurrences
+ * const iterator = Cron.sequence(cron, new Date("2023-01-01"))
+ * const next5 = Array.from({ length: 5 }, () => iterator.next().value)
+ *
+ * console.log(next5)
+ * // [Mon Jan 02 2023 09:00:00, Tue Jan 03 2023 09:00:00, ...]
+ * ```
+ *
+ * @see {@link next} for computing one next occurrence
+ *
+ * @category sequencing
  * @since 2.0.0
  */
-export const sequence = function*(cron: Cron, startFrom?: DateTime.DateTime.Input): IterableIterator<Date> {
+export const sequence = function*(cron: Cron, now?: DateTime.DateTime.Input): IterableIterator<Date> {
   while (true) {
-    yield startFrom = next(cron, startFrom)
+    yield now = next(cron, now)
   }
 }
 
 /**
- * Returns an `IterableIterator` which yields the sequence of `Date`s that match the `Cron` instance,
- * in reverse direction.
+ * Equivalence instance for comparing the field restrictions of two `Cron`
+ * schedules.
  *
- * @since 3.20.0
- */
-export const sequenceReverse = function*(cron: Cron, startFrom?: DateTime.DateTime.Input): IterableIterator<Date> {
-  while (true) {
-    yield startFrom = prev(cron, startFrom)
-  }
-}
-
-/**
+ * **When to use**
+ *
+ * Use to compare cron schedules through APIs that accept an equivalence
+ * relation.
+ *
+ * **Details**
+ *
+ * This comparison checks seconds, minutes, hours, days, months, and weekdays.
+ * It does not compare the optional timezone.
+ *
+ * **Example** (Comparing schedules with equivalence)
+ *
+ * ```ts
+ * import { Cron } from "effect"
+ *
+ * const cron1 = Cron.make({
+ *   minutes: [0, 30],
+ *   hours: [9],
+ *   days: [1, 15],
+ *   months: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+ *   weekdays: [1, 2, 3, 4, 5]
+ * })
+ *
+ * const cron2 = Cron.make({
+ *   minutes: [30, 0], // Different order
+ *   hours: [9],
+ *   days: [15, 1], // Different order
+ *   months: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+ *   weekdays: [1, 2, 3, 4, 5]
+ * })
+ *
+ * console.log(Cron.Equivalence(cron1, cron2)) // true
+ * ```
+ *
+ * @see {@link equals} for directly comparing two `Cron` values
+ *
  * @category instances
  * @since 2.0.0
  */
-export const Equivalence: equivalence.Equivalence<Cron> = equivalence.make((self, that) =>
+export const Equivalence: Equ.Equivalence<Cron> = Equ.make((self, that) =>
   restrictionsEquals(self.seconds, that.seconds) &&
   restrictionsEquals(self.minutes, that.minutes) &&
   restrictionsEquals(self.hours, that.hours) &&
@@ -669,15 +1008,52 @@ export const Equivalence: equivalence.Equivalence<Cron> = equivalence.make((self
   restrictionsEquals(self.weekdays, that.weekdays)
 )
 
-const restrictionsArrayEquals = equivalence.array(equivalence.number)
+const restrictionsArrayEquals = Equ.Array(Equ.strictEqual<number>())
 const restrictionsEquals = (self: ReadonlySet<number>, that: ReadonlySet<number>): boolean =>
   restrictionsArrayEquals(Arr.fromIterable(self), Arr.fromIterable(that))
 
 /**
- * Checks if two `Cron`s are equal.
+ * Checks whether two `Cron` instances have the same field restrictions.
  *
- * @since 2.0.0
+ * **When to use**
+ *
+ * Use to directly compare whether two cron schedules have the same field
+ * restrictions.
+ *
+ * **Details**
+ *
+ * The comparison checks seconds, minutes, hours, days, months, and weekdays.
+ * It does not compare the optional timezone.
+ *
+ * **Example** (Checking schedule equality)
+ *
+ * ```ts
+ * import { Cron } from "effect"
+ *
+ * const cron1 = Cron.make({
+ *   minutes: [0],
+ *   hours: [9],
+ *   days: [1, 15],
+ *   months: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+ *   weekdays: [1, 2, 3, 4, 5]
+ * })
+ *
+ * const cron2 = Cron.make({
+ *   minutes: [0],
+ *   hours: [9],
+ *   days: [1, 15],
+ *   months: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+ *   weekdays: [1, 2, 3, 4, 5]
+ * })
+ *
+ * console.log(Cron.equals(cron1, cron2)) // true
+ * console.log(Cron.equals(cron1)(cron2)) // true (curried form)
+ * ```
+ *
+ * @see {@link Equivalence} for the reusable equivalence instance
+ *
  * @category predicates
+ * @since 2.0.0
  */
 export const equals: {
   (that: Cron): (self: Cron) => boolean
@@ -746,7 +1122,7 @@ const weekdayOptions: SegmentOptions = {
 const parseSegment = (
   input: string,
   options: SegmentOptions
-): Either.Either<ReadonlySet<number>, ParseError> => {
+): Result.Result<ReadonlySet<number>, CronParseError> => {
   const capacity = options.max - options.min + 1
   const values = new Set<number>()
   const fields = input.split(",")
@@ -754,18 +1130,18 @@ const parseSegment = (
   for (const field of fields) {
     const [raw, step] = splitStep(field)
     if (raw === "*" && step === undefined) {
-      return Either.right(new Set())
+      return Result.succeed(new Set())
     }
 
     if (step !== undefined) {
       if (!Number.isInteger(step)) {
-        return Either.left(new ParseError({ message: `Expected step value to be a positive integer`, input }))
+        return Result.fail(new CronParseError({ message: `Expected step value to be a positive integer`, input }))
       }
       if (step < 1) {
-        return Either.left(new ParseError({ message: `Expected step value to be greater than 0`, input }))
+        return Result.fail(new CronParseError({ message: `Expected step value to be greater than 0`, input }))
       }
       if (step > options.max) {
-        return Either.left(new ParseError({ message: `Expected step value to be less than ${options.max}`, input }))
+        return Result.fail(new CronParseError({ message: `Expected step value to be less than ${options.max}`, input }))
       }
     }
 
@@ -776,11 +1152,11 @@ const parseSegment = (
     } else {
       const [left, right] = splitRange(raw, options.aliases)
       if (!Number.isInteger(left)) {
-        return Either.left(new ParseError({ message: `Expected a positive integer`, input }))
+        return Result.fail(new CronParseError({ message: `Expected a positive integer`, input }))
       }
       if (left < options.min || left > options.max) {
-        return Either.left(
-          new ParseError({ message: `Expected a value between ${options.min} and ${options.max}`, input })
+        return Result.fail(
+          new CronParseError({ message: `Expected a value between ${options.min} and ${options.max}`, input })
         )
       }
 
@@ -788,15 +1164,15 @@ const parseSegment = (
         values.add(left)
       } else {
         if (!Number.isInteger(right)) {
-          return Either.left(new ParseError({ message: `Expected a positive integer`, input }))
+          return Result.fail(new CronParseError({ message: `Expected a positive integer`, input }))
         }
         if (right < options.min || right > options.max) {
-          return Either.left(
-            new ParseError({ message: `Expected a value between ${options.min} and ${options.max}`, input })
+          return Result.fail(
+            new CronParseError({ message: `Expected a value between ${options.min} and ${options.max}`, input })
           )
         }
         if (left > right) {
-          return Either.left(new ParseError({ message: `Invalid value range`, input }))
+          return Result.fail(new CronParseError({ message: `Invalid value range`, input }))
         }
 
         for (let i = left; i <= right; i += step ?? 1) {
@@ -806,26 +1182,26 @@ const parseSegment = (
     }
 
     if (values.size >= capacity) {
-      return Either.right(new Set())
+      return Result.succeed(new Set())
     }
   }
 
-  return Either.right(values)
+  return Result.succeed(values)
 }
 
 const splitStep = (input: string): [string, number | undefined] => {
-  const seperator = input.indexOf("/")
-  if (seperator !== -1) {
-    return [input.slice(0, seperator), Number(input.slice(seperator + 1))]
+  const separator = input.indexOf("/")
+  if (separator !== -1) {
+    return [input.slice(0, separator), Number(input.slice(separator + 1))]
   }
 
   return [input, undefined]
 }
 
 const splitRange = (input: string, aliases?: Record<string, number>): [number, number | undefined] => {
-  const seperator = input.indexOf("-")
-  if (seperator !== -1) {
-    return [aliasOrValue(input.slice(0, seperator), aliases), aliasOrValue(input.slice(seperator + 1), aliases)]
+  const separator = input.indexOf("-")
+  if (separator !== -1) {
+    return [aliasOrValue(input.slice(0, separator), aliases), aliasOrValue(input.slice(separator + 1), aliases)]
   }
 
   return [aliasOrValue(input, aliases), undefined]

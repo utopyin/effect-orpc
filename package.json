@@ -29,6 +29,8 @@
   },
   "packageManager": "bun@1.3.9",
   "catalog": {
+    "@effect/opentelemetry": "4.0.0-beta.83",
+    "effect": "4.0.0-beta.83",
     "vitest": "^4.0.18"
   }
 }

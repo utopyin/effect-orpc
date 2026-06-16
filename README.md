@@ -97,15 +97,15 @@ The wrapper enforces that Effect procedures only use services provided by `.prov
 import { Context, Effect, Layer } from "effect";
 import { eos } from "effect-orpc";
 
-class ProvidedService extends Context.Tag("ProvidedService")<
+class ProvidedService extends Context.Service<
   ProvidedService,
   { doSomething: () => Effect.Effect<string> }
->() {}
+>()("ProvidedService") {}
 
-class MissingService extends Context.Tag("MissingService")<
+class MissingService extends Context.Service<
   MissingService,
   { doSomething: () => Effect.Effect<string> }
->() {}
+>()("MissingService") {}
 
 const AppLive = Layer.succeed(ProvidedService, {
   doSomething: () => Effect.succeed("ok"),
@@ -367,7 +367,7 @@ eos
   });
 ```
 
-That split still creates multiple runtime boundaries. If the Node bridge is installed, however, `effect-orpc` carries the current `FiberRefs` through the native oRPC continuation and merges them into the next Effect boundary:
+That split still creates multiple runtime boundaries. If the Node bridge is installed, however, `effect-orpc` carries the current Effect service context through the native oRPC continuation and merges it into the next Effect boundary:
 
 ```ts
 import "effect-orpc/node";
@@ -386,14 +386,14 @@ eos
 
 If you want `.provide*` and Effect middleware to batch with the handler, use `.effect(function* ...)` instead of `.handler(...)`.
 
-## Request-Scoped Fiber Context
+## Request-Scoped Effect Context
 
 The `/node` entrypoint installs a bridge backed by `AsyncLocalStorage`. It has two uses:
 
-- `import "effect-orpc/node"` installs the bridge passively. This is enough for `effect-orpc` to propagate `FiberRefs` across its own split runtime boundaries.
+- `import "effect-orpc/node"` installs the bridge passively. This is enough for `effect-orpc` to propagate the current Effect service context across its own split runtime boundaries.
 - `withFiberContext(() => next())` actively seeds the bridge from an external Effect scope, such as framework middleware wrapping an oRPC handler.
 
-Use `withFiberContext` when request-local `FiberRef` state is created outside the oRPC pipeline and should be visible inside handlers:
+Use `withFiberContext` when request-local Effect context is created outside the oRPC pipeline and should be visible inside handlers:
 
 ```ts
 import { Hono } from "hono";

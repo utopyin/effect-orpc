@@ -1,24 +1,26 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 
-import type { FiberRefs } from "effect";
+import type { Context } from "effect";
 import { Effect } from "effect";
 
 import {
-  installFiberContextBridge,
-  type FiberContextBridge,
-} from "./fiber-context-bridge";
+  installServiceContextBridge,
+  type ServiceContextBridge,
+} from "./service-context-bridge";
 
-const fiberRefsStorage = new AsyncLocalStorage<FiberRefs.FiberRefs>();
+const servicesStorage = new AsyncLocalStorage<Context.Context<any>>();
 
-const bridge: FiberContextBridge = {
-  getCurrentFiberRefs: () => fiberRefsStorage.getStore(),
-  runWithFiberRefs: (fiberRefs, fn) => fiberRefsStorage.run(fiberRefs, fn),
+const bridge: ServiceContextBridge = {
+  getCurrentServices: () => servicesStorage.getStore(),
+  runWithServices: (services, fn) => servicesStorage.run(services, fn),
 };
 
-installFiberContextBridge(bridge);
+installServiceContextBridge(bridge);
 
-export function withFiberContext<T>(fn: () => Promise<T>): Effect.Effect<T> {
-  return Effect.flatMap(Effect.getFiberRefs, (fiberRefs) =>
-    Effect.promise(() => bridge.runWithFiberRefs!(fiberRefs, fn)),
+export function withFiberContext<T, R = never>(
+  fn: () => Promise<T>,
+): Effect.Effect<T, never, R> {
+  return Effect.flatMap(Effect.context<R>(), (services) =>
+    Effect.promise(() => servicesStorage.run(services, fn)),
   );
 }

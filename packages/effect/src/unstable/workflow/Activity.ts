@@ -34,8 +34,8 @@ const TypeId = "~effect/workflow/Activity"
  * @since 4.0.0
  */
 export interface Activity<
-  Success extends Schema.Top = Schema.Void,
-  Error extends Schema.Top = Schema.Never,
+  Success extends Schema.Constraint = Schema.Void,
+  Error extends Schema.Constraint = Schema.Never,
   R = never
 > extends
   Effect.Effect<
@@ -49,6 +49,7 @@ export interface Activity<
   readonly successSchema: Success
   readonly errorSchema: Error
   readonly exitSchema: Schema.Exit<Success, Error, Schema.Defect>
+  readonly exitSchemaPartial: Schema.Exit<Success, Error, Schema.Unknown>
   readonly annotations: Context.Context<never>
   annotate<I, S>(
     key: Context.Key<I, S>,
@@ -121,8 +122,8 @@ export interface AnyWithProps {
  */
 export const make = <
   R,
-  Success extends Schema.Top = Schema.Void,
-  Error extends Schema.Top = Schema.Never
+  Success extends Schema.Constraint = Schema.Void,
+  Error extends Schema.Constraint = Schema.Never
 >(options: {
   readonly name: string
   readonly success?: Success | undefined
@@ -153,6 +154,7 @@ export const make = <
     successSchema,
     errorSchema,
     exitSchema: Schema.Exit(successSchemaJson, errorSchemaJson, Schema.Defect()),
+    exitSchemaPartial: Schema.Exit(successSchemaJson, errorSchemaJson, Schema.Unknown),
     annotations: options.annotations ?? Context.empty(),
     annotate(tag: Context.Key<any, any>, value: any) {
       return make({
@@ -176,11 +178,12 @@ export const make = <
   return self
 }
 
-const interruptRetryPolicy = Schedule.exponential(4.0, 1.5).pipe(
-  Schedule.either(Schedule.spaced("10 seconds")),
-  Schedule.either(Schedule.recurs(10)),
-  Schedule.satisfiesInputType<Cause.Cause<unknown>>(),
-  Schedule.while((meta) => Effect.succeed(Cause.hasInterrupts(meta.input)))
+const interruptRetryPolicy = Schedule.min([
+  Schedule.exponential(400, 1.5),
+  Schedule.spaced("10 seconds")
+]).pipe(
+  Schedule.setInputType<Cause.Cause<unknown>>(),
+  Schedule.while((meta) => meta.attempt <= 10 && Cause.hasInterrupts(meta.input))
 )
 
 const retryOnInterrupt = (
@@ -301,8 +304,8 @@ const InstanceTag = Context.Service<WorkflowInstance, WorkflowInstance["Service"
 
 const makeExecute = Effect.fnUntraced(function*<
   R,
-  Success extends Schema.Top = typeof Schema.Void,
-  Error extends Schema.Top = typeof Schema.Never
+  Success extends Schema.Constraint = typeof Schema.Void,
+  Error extends Schema.Constraint = typeof Schema.Never
 >(activity: Activity<Success, Error, R>) {
   const engine = yield* EngineTag
   const instance = yield* InstanceTag

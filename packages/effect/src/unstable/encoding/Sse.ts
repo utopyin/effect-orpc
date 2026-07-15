@@ -80,15 +80,15 @@ export const decode = <IE, Done>(): Channel.Channel<
  * @since 4.0.0
  */
 export interface EventCodec extends
-  Schema.Codec<
+  Schema.ConstraintCodec<
     any,
     {
       readonly id?: string | undefined
       readonly event?: string | undefined
       readonly data: string
     },
-    any,
-    any
+    unknown,
+    unknown
   >
 {}
 
@@ -137,7 +137,7 @@ export const decodeSchema = <
  * @since 4.0.0
  */
 export const decodeDataSchema = <Type, DecodingServices, IE, Done>(
-  schema: Schema.Decoder<Type, DecodingServices>
+  schema: Schema.ConstraintDecoder<Type, DecodingServices>
 ): Channel.Channel<
   NonEmptyReadonlyArray<{
     readonly event: string

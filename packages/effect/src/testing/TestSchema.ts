@@ -12,6 +12,7 @@
 import * as assert from "node:assert"
 import type * as Context from "../Context.ts"
 import * as Effect from "../Effect.ts"
+import { pipe } from "../Function.ts"
 import * as Record from "../Record.ts"
 import * as Result from "../Result.ts"
 import * as Schema from "../Schema.ts"
@@ -48,7 +49,7 @@ import * as FastCheck from "../testing/FastCheck.ts"
  * @category testing
  * @since 4.0.0
  */
-export class Asserts<S extends Schema.Top> {
+export class Asserts<S extends Schema.Constraint> {
   /**
    * Static helpers for comparing schema AST structures.
    *
@@ -154,7 +155,7 @@ export class Asserts<S extends Schema.Top> {
    *
    * FastCheck generates arbitrary values matching the schema's `Type`. The assertion fails if any generated value does not round-trip. Pass `options.params` to control FastCheck parameters such as `numRuns`.
    *
-   * **Example** (Round-trip verification)
+   * **Example** (Verifying round trips)
    *
    * ```ts
    * import { Schema } from "effect"
@@ -166,7 +167,7 @@ export class Asserts<S extends Schema.Top> {
    *
    * @see {@link arbitrary} for checking that generated values satisfy the schema
    */
-  verifyLosslessTransformation<S extends Schema.Codec<unknown, unknown>>(this: Asserts<S>, options?: {
+  verifyLosslessTransformation<S extends Schema.ConstraintCodec<unknown, unknown>>(this: Asserts<S>, options?: {
     readonly params?: FastCheck.Parameters<[S["Type"]]>
   }) {
     const decodeUnknownEffect = SchemaParser.decodeUnknownEffect(this.schema)
@@ -271,7 +272,7 @@ export class Asserts<S extends Schema.Top> {
    *
    * @see {@link verifyLosslessTransformation} for property-based round-trip checks
    */
-  arbitrary<S extends Schema.Codec<unknown, unknown, never, unknown>>(this: Asserts<S>) {
+  arbitrary<S extends Schema.ConstraintCodec<unknown, unknown>>(this: Asserts<S>) {
     const schema = this.schema
     return {
       verifyGeneration(options?: {
@@ -313,7 +314,7 @@ export class Asserts<S extends Schema.Top> {
  * @category testing
  * @since 4.0.0
  */
-export class Decoding<S extends Schema.Top> {
+export class Decoding<S extends Schema.Constraint> {
   readonly schema: S
   readonly decodeUnknownEffect: (
     input: unknown,
@@ -338,7 +339,7 @@ export class Decoding<S extends Schema.Top> {
    *
    * Use to verify successful decoding for one input case.
    *
-   * **Example** (Identity and transformed decoding)
+   * **Example** (Testing identity and transformed decoding)
    *
    * ```ts
    * import { Schema } from "effect"
@@ -350,16 +351,16 @@ export class Decoding<S extends Schema.Top> {
    *
    * @see {@link fail} for asserting decoding failures
    */
-  async succeed<S extends Schema.Decoder<unknown, never>>(
+  async succeed<S extends Schema.ConstraintDecoder<unknown, never>>(
     this: Decoding<S>,
     input: unknown
   ): Promise<void>
-  async succeed<S extends Schema.Decoder<unknown, never>>(
+  async succeed<S extends Schema.ConstraintDecoder<unknown, never>>(
     this: Decoding<S>,
     input: unknown,
     expected: S["Type"]
   ): Promise<void>
-  async succeed<S extends Schema.Decoder<unknown, never>>(
+  async succeed<S extends Schema.ConstraintDecoder<unknown, never>>(
     this: Decoding<S>,
     input: unknown,
     expected?: S["Type"]
@@ -393,7 +394,7 @@ export class Decoding<S extends Schema.Top> {
    *
    * @see {@link succeed} for asserting successful decoding
    */
-  async fail<S extends Schema.Decoder<unknown, never>>(
+  async fail<S extends Schema.ConstraintDecoder<unknown, never>>(
     this: Decoding<S>,
     input: unknown,
     message: string
@@ -420,7 +421,7 @@ export class Decoding<S extends Schema.Top> {
     implementation: Service
   ): Decoding<Schema.middlewareDecoding<S, Exclude<S["DecodingServices"], Id>>> {
     return new Decoding(
-      this.schema.pipe(Schema.middlewareDecoding(Effect.provideService(service, implementation))),
+      pipe(this.schema, Schema.middlewareDecoding(Effect.provideService(service, implementation))),
       this.options
     )
   }
@@ -453,7 +454,7 @@ export class Decoding<S extends Schema.Top> {
  * @category testing
  * @since 4.0.0
  */
-export class Encoding<S extends Schema.Top> {
+export class Encoding<S extends Schema.Constraint> {
   readonly schema: S
   readonly encodeUnknownEffect: (
     input: unknown,
@@ -478,7 +479,7 @@ export class Encoding<S extends Schema.Top> {
    *
    * Use to verify successful encoding for one input case.
    *
-   * **Example** (Identity and transformed encoding)
+   * **Example** (Testing identity and transformed encoding)
    *
    * ```ts
    * import { Schema } from "effect"
@@ -490,16 +491,16 @@ export class Encoding<S extends Schema.Top> {
    *
    * @see {@link fail} for asserting encoding failures
    */
-  async succeed<S extends Schema.Encoder<unknown, never>>(
+  async succeed<S extends Schema.ConstraintEncoder<unknown, never>>(
     this: Encoding<S>,
     input: unknown
   ): Promise<void>
-  async succeed<S extends Schema.Encoder<unknown, never>>(
+  async succeed<S extends Schema.ConstraintEncoder<unknown, never>>(
     this: Encoding<S>,
     input: unknown,
     expected: S["Encoded"]
   ): Promise<void>
-  async succeed<S extends Schema.Encoder<unknown, never>>(
+  async succeed<S extends Schema.ConstraintEncoder<unknown, never>>(
     this: Encoding<S>,
     input: unknown,
     expected?: S["Encoded"]
@@ -533,7 +534,7 @@ export class Encoding<S extends Schema.Top> {
    *
    * @see {@link succeed} for asserting successful encoding
    */
-  async fail<S extends Schema.Encoder<unknown, never>>(
+  async fail<S extends Schema.ConstraintEncoder<unknown, never>>(
     this: Encoding<S>,
     input: unknown,
     message: string
@@ -560,7 +561,7 @@ export class Encoding<S extends Schema.Top> {
     implementation: Service
   ): Encoding<Schema.middlewareEncoding<S, Exclude<S["EncodingServices"], Id>>> {
     return new Encoding(
-      this.schema.pipe(Schema.middlewareEncoding(Effect.provideService(service, implementation))),
+      pipe(this.schema, Schema.middlewareEncoding(Effect.provideService(service, implementation))),
       this.options
     )
   }

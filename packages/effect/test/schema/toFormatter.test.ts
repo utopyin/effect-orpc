@@ -182,6 +182,18 @@ describe("toFormatter", () => {
     strictEqual(format([Option.none(), Option.none(), Option.some("a")]), `[none(), none(), some("a")]`)
   })
 
+  it("TupleWithRest with multiple post-rest elements", () => {
+    const format = Schema.toFormatter(
+      Schema.TupleWithRest(Schema.Tuple([Schema.String]), [
+        Schema.String,
+        Schema.Number,
+        Schema.Boolean,
+        Schema.String
+      ])
+    )
+    strictEqual(format(["head", "tail", 1, true, "last"]), `["head", "tail", 1, true, "last"]`)
+  })
+
   describe("Struct", () => {
     it("empty", () => {
       const format = Schema.toFormatter(Schema.Struct({}))
@@ -236,6 +248,14 @@ describe("toFormatter", () => {
       const format = Schema.toFormatter(Schema.Record(Schema.String, Schema.Option(Schema.Number)))
       strictEqual(format({ a: Option.some(1) }), `{ "a": some(1) }`)
       strictEqual(format({ a: Option.none() }), `{ "a": none() }`)
+    })
+
+    it("Record(String.check, Option(Number)) should use the key checks to select keys", () => {
+      const format = Schema.toFormatter(Schema.Record(
+        Schema.String.check(Schema.isPattern(/^a/)),
+        Schema.Option(Schema.Number)
+      ))
+      strictEqual(format({ a: Option.some(1), b: Option.some(2) }), `{ "a": some(1) }`)
     })
 
     it("Record(Symbol, Option(Number))", () => {
@@ -550,7 +570,7 @@ describe("toFormatter", () => {
   })
 
   it("should allow for ast-level overrides", () => {
-    const toFormatter = <S extends Schema.Top>(schema: S) =>
+    const toFormatter = <S extends Schema.Constraint>(schema: S) =>
       Schema.toFormatter(schema, {
         onBefore: (ast) => {
           if (ast._tag === "Boolean") {

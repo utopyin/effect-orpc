@@ -61,7 +61,7 @@ export interface HttpIncomingMessage<E = unknown> extends Inspectable.Inspectabl
  * @category schemas
  * @since 4.0.0
  */
-export const schemaBodyJson = <S extends Schema.Top>(schema: S, options?: ParseOptions | undefined) => {
+export const schemaBodyJson = <S extends Schema.Constraint>(schema: S, options?: ParseOptions | undefined) => {
   const decode = Schema.decodeEffect(Schema.toCodecJson(schema))
   return <E>(
     self: HttpIncomingMessage<E>
@@ -78,10 +78,9 @@ export const schemaBodyJson = <S extends Schema.Top>(schema: S, options?: ParseO
 export const schemaBodyUrlParams = <
   A,
   I extends Readonly<Record<string, string | ReadonlyArray<string> | undefined>>,
-  RD,
-  RE
+  RD
 >(
-  schema: Schema.Codec<A, I, RD, RE>,
+  schema: Schema.ConstraintCodec<A, I, RD, unknown>,
   options?: ParseOptions | undefined
 ) => {
   const decode = UrlParams.schemaRecord.pipe(
@@ -98,8 +97,8 @@ export const schemaBodyUrlParams = <
  * @category schemas
  * @since 4.0.0
  */
-export const schemaHeaders = <A, I extends Readonly<Record<string, string | undefined>>, RD, RE>(
-  schema: Schema.Codec<A, I, RD, RE>,
+export const schemaHeaders = <A, I extends Readonly<Record<string, string | undefined>>, RD>(
+  schema: Schema.ConstraintCodec<A, I, RD, unknown>,
   options?: ParseOptions | undefined
 ) => {
   const decode = Schema.decodeUnknownEffect(schema)

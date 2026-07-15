@@ -1,9 +1,9 @@
 {
   "lockfileVersion": 1,
-  "configVersion": 0,
+  "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "effect-orpc",
+      "name": "effect-orpc-workspace",
       "devDependencies": {
         "@changesets/cli": "^2.30.0",
         "knip": "^6.16.1",
@@ -37,7 +37,7 @@
     },
     "packages/effect-orpc": {
       "name": "effect-orpc",
-      "version": "1.0.0-effect-v4.7",
+      "version": "1.0.0-effect-v4.8",
       "devDependencies": {
         "@types/bun": "latest",
         "effect": "catalog:",

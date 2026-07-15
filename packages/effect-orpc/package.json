@@ -60,7 +60,7 @@
     "@orpc/contract": ">=1.13.0",
     "@orpc/server": ">=1.13.0",
     "@orpc/shared": ">=1.13.0",
-    "effect": ">=4.0.0-beta.83",
+    "effect": ">=4.0.0-beta.98",
     "typescript": "^5"
   }
 }

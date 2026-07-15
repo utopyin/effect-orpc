@@ -24,6 +24,7 @@ import * as Schema from "../../Schema.ts"
 import type { Formatter } from "../../SchemaIssue.ts"
 import type * as Struct from "../../Struct.ts"
 import type { Covariant } from "../../Types.ts"
+import type { Environment } from "./Command.ts"
 
 const TypeId = "~effect/cli/Primitive"
 
@@ -58,7 +59,7 @@ const TypeId = "~effect/cli/Primitive"
  */
 export interface Primitive<out A> extends Primitive.Variance<A> {
   readonly _tag: string
-  readonly parse: (value: string) => Effect.Effect<A, string, FileSystem.FileSystem | Path.Path>
+  readonly parse: (value: string) => Effect.Effect<A, string, Environment>
 }
 
 /**
@@ -97,18 +98,16 @@ export const isBoolean = (p: Primitive<unknown>): p is Primitive<boolean> => p._
 
 const makePrimitive = <A>(
   tag: string,
-  parse: (
-    value: string
-  ) => Effect.Effect<A, string, FileSystem.FileSystem | Path.Path>
+  parse: (value: string) => Effect.Effect<A, string, Environment>
 ): Primitive<A> =>
   Object.assign(Object.create(Proto), {
     _tag: tag,
     parse
   })
 
-const makeSchemaPrimitive = <T, E>(
+const makeSchemaPrimitive = <T>(
   tag: string,
-  schema: Schema.Codec<T, E>
+  schema: Schema.ConstraintDecoder<T, Environment>
 ): Primitive<T> => {
   const toCodecStringTree = Schema.toCodecStringTree(schema)
   const decode = Schema.decodeUnknownEffect(toCodecStringTree)
@@ -614,7 +613,7 @@ export type FileSchemaOptions = Struct.Simplify<
  * @since 4.0.0
  */
 export const fileSchema = <A>(
-  schema: Schema.Decoder<A>,
+  schema: Schema.ConstraintDecoder<A, Environment>,
   options?: FileSchemaOptions | undefined
 ): Primitive<A> => {
   const decode = Schema.decodeUnknownEffect(schema)

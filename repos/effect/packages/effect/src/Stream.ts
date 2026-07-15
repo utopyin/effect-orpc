@@ -1471,7 +1471,7 @@ export const fromAsyncIterable = <A, E>(
  *
  * const program = Effect.gen(function*() {
  *   const schedule = Schedule.spaced("50 millis").pipe(
- *     Schedule.both(Schedule.recurs(2))
+ *     Schedule.upTo({ times: 3 })
  *   )
  *   const stream = Stream.fromSchedule(schedule)
  *   const values = yield* Stream.runCollect(stream)
@@ -2413,7 +2413,7 @@ export const tapSink: {
  * multiple inner streams may run at the same time and their outputs are merged
  * as they arrive.
  *
- * **Example** (FlatMapping stream values)
+ * **Example** (Flat mapping stream values)
  *
  * ```ts
  * import { Console, Effect, Stream } from "effect"
@@ -10937,7 +10937,7 @@ export const runForEachWhile: {
           if (!b) done = true
         }
       }),
-      () => done
+      () => !done
     )
   }))
 

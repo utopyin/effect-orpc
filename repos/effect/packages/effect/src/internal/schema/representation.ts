@@ -95,12 +95,12 @@ export function fromASTs(asts: readonly [SchemaAST.AST, ...Array<SchemaAST.AST>]
     return out
   }
 
-  function getEncodedSchema(last: SchemaAST.Declaration): SchemaAST.AST {
+  function getEncodedSchema(last: SchemaAST.Declaration): SchemaAST.Declaration | SchemaAST.Null {
     const getLink = last.annotations?.toCodecJson ?? last.annotations?.toCodec
     if (Predicate.isFunction(getLink)) {
-      const tps = last.typeParameters.map((tp) => InternalSchema.make(SchemaAST.toEncoded(tp)))
-      const link = getLink(tps)
-      return SchemaAST.replaceEncoding(last, [link])
+      return SchemaAST.replaceEncoding(last, [
+        getLink(last.typeParameters.map((tp) => InternalSchema.make(SchemaAST.toEncoded(tp))))
+      ])
     }
     return SchemaAST.null
   }
@@ -127,6 +127,7 @@ export function fromASTs(asts: readonly [SchemaAST.AST, ...Array<SchemaAST.AST>]
       case "Any":
       case "Boolean":
       case "Symbol":
+      case "ObjectKeyword":
         return { _tag: last._tag, ...annotations }
       case "String": {
         const contentMediaType = last.annotations?.contentMediaType
@@ -157,11 +158,6 @@ export function fromASTs(asts: readonly [SchemaAST.AST, ...Array<SchemaAST.AST>]
         return {
           _tag: last._tag,
           symbol: last.symbol,
-          ...annotations
-        }
-      case "ObjectKeyword":
-        return {
-          _tag: last._tag,
           ...annotations
         }
       case "Enum":

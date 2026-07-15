@@ -101,6 +101,18 @@ describe("toEquivalence", () => {
     assertFalse(equivalence(["a", 1, "b", 2], ["a", 1, "b", 3]))
   })
 
+  it("TupleWithRest with multiple post-rest elements", () => {
+    const schema = Schema.TupleWithRest(Schema.Tuple([Schema.String]), [
+      Schema.String,
+      Schema.Number,
+      Schema.Boolean,
+      Schema.String
+    ])
+    const equivalence = Schema.toEquivalence(schema)
+    assertTrue(equivalence(["head", "tail", 1, true, "last"], ["head", "tail", 1, true, "last"]))
+    assertFalse(equivalence(["head", "tail", 1, true, "A"], ["head", "tail", 1, true, "B"]))
+  })
+
   describe("Struct", () => {
     it("should fail on non-record inputs", () => {
       const schema = Schema.Struct({ a: Schema.String })
@@ -192,6 +204,13 @@ describe("toEquivalence", () => {
       assertTrue(equivalence({ a: 1, b: undefined }, { a: 1, b: undefined }))
       assertFalse(equivalence({ a: 1, b: undefined }, { a: 1 }))
       assertFalse(equivalence({ a: 1 }, { a: 1, b: undefined }))
+    })
+
+    it("Record(String.check, Number) should use the key checks to select keys", () => {
+      const schema = Schema.Record(Schema.String.check(Schema.isPattern(/^a/)), Schema.Number)
+      const equivalence = Schema.toEquivalence(schema)
+      assertTrue(equivalence({ a: 1, b: 1 }, { a: 1, b: 2 }))
+      assertFalse(equivalence({ a: 1 }, { a: 2 }))
     })
 
     it("Record(Symbol, Number)", () => {

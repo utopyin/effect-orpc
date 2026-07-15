@@ -233,7 +233,7 @@ export const Accepted: Accepted = Empty(202)
  * @category schemas
  * @since 4.0.0
  */
-export interface asNoContent<S extends Schema.Top> extends Schema.decodeTo<Schema.toType<S>, Schema.Void> {}
+export interface asNoContent<S extends Schema.Constraint> extends Schema.decodeTo<Schema.toType<S>, Schema.Void> {}
 
 /**
  * Marks a schema as a no-content response while preserving a decoded client value.
@@ -249,7 +249,7 @@ export interface asNoContent<S extends Schema.Top> extends Schema.decodeTo<Schem
  * @category encoding
  * @since 4.0.0
  */
-export function asNoContent<S extends Schema.Top>(options: {
+export function asNoContent<S extends Schema.Constraint>(options: {
   readonly decode: LazyArg<S["Type"]>
 }) {
   return (self: S): asNoContent<S> => {
@@ -287,24 +287,35 @@ export type StreamSseMode = "events" | "data"
  * constructed from `data`, handlers and clients expose raw data values while
  * the server and client still use an SSE event schema internally.
  *
+ * **Gotchas**
+ *
+ * The client treats `effect/httpapi/stream/failure` as a stream failure only
+ * when its decoded `data` is a `Cause`. If an event schema accepts that name
+ * dynamically but decodes `data` to another value, the client emits it as an
+ * application event. Endpoint construction rejects event schemas that declare
+ * the reserved name statically.
+ *
  * @category models
  * @since 4.0.0
  */
 export interface StreamSse<
   Events extends Sse.EventCodec,
-  Error extends Schema.Top,
+  Error extends Schema.Constraint,
   Value = Events["Type"]
 > extends
-  Schema.Bottom<
-    Stream.Stream<Value, Error["Type"], never>,
-    Stream.Stream<Value, Error["Type"], never>,
-    Events["DecodingServices"] | Error["DecodingServices"],
-    Events["EncodingServices"] | Error["EncodingServices"],
+  Schema.BottomLazy<
     SchemaAST.Declaration,
     StreamSse<Events, Error, Value>
   >
 {
+  readonly "Type": Stream.Stream<Value, Error["Type"], never>
+  readonly "Encoded": Stream.Stream<Value, Error["Type"], never>
+  readonly "DecodingServices": Events["DecodingServices"] | Error["DecodingServices"]
+  readonly "EncodingServices": Events["EncodingServices"] | Error["EncodingServices"]
   readonly "Rebuild": StreamSse<Events, Error, Value>
+  readonly "~type.make.in": Stream.Stream<Value, Error["Type"], never>
+  readonly "~type.make": Stream.Stream<Value, Error["Type"], never>
+  readonly "Iso": Stream.Stream<Value, Error["Type"], never>
   readonly [StreamSchemaTypeId]: typeof StreamSchemaTypeId
   readonly _tag: "StreamSse"
   readonly mode: "sse"
@@ -321,8 +332,8 @@ export interface StreamSse<
  * @category models
  * @since 4.0.0
  */
-export interface SseEventFromData<Data extends Schema.Top> extends
-  Schema.Codec<
+export interface SseEventFromData<Data extends Schema.Constraint> extends
+  Schema.ConstraintCodec<
     {
       readonly id: string | undefined
       readonly event: string
@@ -375,20 +386,6 @@ export interface StreamUint8Array extends
  */
 export type StreamSchema = StreamSse<Sse.EventCodec, Schema.Top, unknown> | StreamUint8Array
 
-/** @internal */
-export type StreamMetadata =
-  | {
-    readonly mode: "sse"
-    readonly sseMode: StreamSseMode
-    readonly contentType: string
-    readonly events: Sse.EventCodec
-    readonly error: Schema.Top
-  }
-  | {
-    readonly mode: "uint8array"
-    readonly contentType: string
-  }
-
 const streamSchema = Schema.declare(Stream.isStream)
 
 /**
@@ -398,12 +395,12 @@ const streamSchema = Schema.declare(Stream.isStream)
  * @since 4.0.0
  */
 export const StreamSse: {
-  <Events extends Sse.EventCodec, Error extends Schema.Top = Schema.Never>(options: {
+  <Events extends Sse.EventCodec, Error extends Schema.Constraint = Schema.Never>(options: {
     readonly contentType?: string | undefined
     readonly events: Events
     readonly error?: Error | undefined
   }): StreamSse<Events, Error, Events["Type"]>
-  <Data extends Schema.Top, Error extends Schema.Top = Schema.Never>(options: {
+  <Data extends Schema.Constraint, Error extends Schema.Constraint = Schema.Never>(options: {
     readonly contentType?: string | undefined
     readonly data: Data
     readonly error?: Error | undefined
@@ -411,8 +408,8 @@ export const StreamSse: {
 } = (options: {
   readonly contentType?: string | undefined
   readonly events?: Sse.EventCodec | undefined
-  readonly data?: Schema.Top | undefined
-  readonly error?: Schema.Top | undefined
+  readonly data?: Schema.Constraint | undefined
+  readonly error?: Schema.Constraint | undefined
 }): StreamSse<Sse.EventCodec, Schema.Top, unknown> => {
   const events = options.events ?? (options.data === undefined ? undefined : Schema.Struct({
     id: Schema.UndefinedOr(Schema.String),
@@ -460,22 +457,6 @@ export const isStreamSse = (u: unknown): u is StreamSse<Sse.EventCodec, Schema.T
 /** @internal */
 export const isStreamUint8Array = (u: unknown): u is StreamUint8Array =>
   isStreamSchema(u) && u._tag === "StreamUint8Array"
-
-/** @internal */
-export function getStreamMetadata(self: StreamSchema): StreamMetadata {
-  return self._tag === "StreamSse" ?
-    {
-      mode: self.mode,
-      sseMode: self.sseMode,
-      contentType: self.contentType,
-      events: self.events,
-      error: self.error
-    } :
-    {
-      mode: self.mode,
-      contentType: self.contentType
-    }
-}
 
 function defaultStreamContentType(mode: StreamMode): string {
   switch (mode) {

@@ -13,6 +13,7 @@ import * as Context from "./Context.ts"
 import type * as Duration from "./Duration.ts"
 import * as Effect from "./Effect.ts"
 import { identity } from "./Function.ts"
+import { getStackTraceLimit, setStackTraceLimit } from "./internal/stackTraceLimit.ts"
 import * as Layer from "./Layer.ts"
 import * as RcMap from "./RcMap.ts"
 import * as Scope from "./Scope.ts"
@@ -152,7 +153,7 @@ export const make: <
   } | undefined
 ) {
   const context = yield* Effect.context<never>()
-  const memoMap = Layer.CurrentMemoMap.getOrCreate(context)
+  const memoMap = Layer.CurrentMemoMap.forkOrCreate(context)
 
   const rcMap = yield* RcMap.make({
     lookup: (key: K) =>
@@ -383,10 +384,10 @@ export const Service = <Self>() =>
     : never
 > => {
   const Err = globalThis.Error as any
-  const limit = Err.stackTraceLimit
-  Err.stackTraceLimit = 2
+  const limit = getStackTraceLimit()
+  setStackTraceLimit(2)
   const creationError = new Err()
-  Err.stackTraceLimit = limit
+  setStackTraceLimit(limit)
 
   function TagClass() {}
   const TagClass_ = TagClass as any as Mutable<TagClass<Self, Id, string, any, any, any, any, any>>

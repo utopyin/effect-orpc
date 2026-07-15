@@ -15,6 +15,7 @@
 /** @effect-diagnostics classSelfMismatch:off */
 import * as Context from "../../Context.ts"
 import * as Effect from "../../Effect.ts"
+import { getStackTraceLimit, setStackTraceLimit } from "../../internal/stackTraceLimit.ts"
 import * as Layer from "../../Layer.ts"
 import { hasProperty } from "../../Predicate.ts"
 import type * as Schema from "../../Schema.ts"
@@ -44,8 +45,8 @@ export const isSecurity = (u: AnyService): u is AnyServiceSecurity => hasPropert
 
 type ErrorConstraint = Schema.Top | ReadonlyArray<Schema.Top>
 
-type ErrorSchemaFromConstraint<E> = E extends ReadonlyArray<Schema.Top> ? E[number]
-  : E extends Schema.Top ? E
+type ErrorSchemaFromConstraint<E> = E extends ReadonlyArray<Schema.Constraint> ? E[number]
+  : E extends Schema.Constraint ? E
   : never
 
 /**
@@ -63,8 +64,8 @@ type ErrorSchemaFromConstraint<E> = E extends ReadonlyArray<Schema.Top> ? E[numb
 export type HttpApiMiddleware<Provides, E extends ErrorConstraint, Requires> = (
   httpEffect: Effect.Effect<HttpServerResponse, unhandled, Provides>,
   options: {
-    readonly endpoint: HttpApiEndpoint.AnyWithProps
-    readonly group: HttpApiGroup.AnyWithProps
+    readonly endpoint: HttpApiEndpoint.Top
+    readonly group: HttpApiGroup.Top
   }
 ) => Effect.Effect<HttpServerResponse, unhandled | ErrorSchemaFromConstraint<E>["Type"], Requires | HttpRouter.Provided>
 
@@ -89,8 +90,8 @@ export type HttpApiMiddlewareSecurity<
     httpEffect: Effect.Effect<HttpServerResponse, unhandled, Provides>,
     options: {
       readonly credential: HttpApiSecurity.HttpApiSecurity.Type<Security[K]>
-      readonly endpoint: HttpApiEndpoint.AnyWithProps
-      readonly group: HttpApiGroup.AnyWithProps
+      readonly endpoint: HttpApiEndpoint.Top
+      readonly group: HttpApiGroup.Top
     }
   ) => Effect.Effect<
     HttpServerResponse,
@@ -112,8 +113,8 @@ export type HttpApiMiddlewareSecurity<
  */
 export interface HttpApiMiddlewareClient<_E, CE, R> {
   (options: {
-    readonly endpoint: HttpApiEndpoint.AnyWithProps
-    readonly group: HttpApiGroup.AnyWithProps
+    readonly endpoint: HttpApiEndpoint.Top
+    readonly group: HttpApiGroup.Top
     readonly request: HttpClientRequest.HttpClientRequest
     readonly next: (
       request: HttpClientRequest.HttpClientRequest
@@ -352,10 +353,10 @@ export const Service = <
   } | undefined
 ) => {
   const Err = globalThis.Error as any
-  const limit = Err.stackTraceLimit
-  Err.stackTraceLimit = 2
+  const limit = getStackTraceLimit()
+  setStackTraceLimit(2)
   const creationError = new Err()
-  Err.stackTraceLimit = limit
+  setStackTraceLimit(limit)
 
   class Service extends Context.Service<Self, any>()(id) {}
   const self = Service as any
@@ -419,7 +420,10 @@ export const layerSchemaErrorTransform = <Id, E extends ErrorConstraint, Require
   service: Context.Service<Id, HttpApiMiddleware<never, E, Requires>>,
   transform: (
     error: HttpApiSchemaError,
-    context: { readonly endpoint: HttpApiEndpoint.AnyWithProps; readonly group: HttpApiGroup.AnyWithProps }
+    context: {
+      readonly endpoint: HttpApiEndpoint.Top
+      readonly group: HttpApiGroup.Top
+    }
   ) => Effect.Effect<
     HttpServerResponse,
     ErrorSchemaFromConstraint<E>["Type"] | HttpApiSchemaError,

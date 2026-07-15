@@ -43,7 +43,7 @@ import * as Rpc from "./Rpc.ts"
 import { RpcClientDefect, RpcClientError } from "./RpcClientError.ts"
 import type * as RpcGroup from "./RpcGroup.ts"
 import type { FromClient, FromClientEncoded, FromServer, FromServerEncoded, Request } from "./RpcMessage.ts"
-import { constPing, RequestId } from "./RpcMessage.ts"
+import { constPing, isTerminalResponse, RequestId } from "./RpcMessage.ts"
 import type * as RpcMiddleware from "./RpcMiddleware.ts"
 import * as RpcSchema from "./RpcSchema.ts"
 import * as RpcSerialization from "./RpcSerialization.ts"
@@ -204,7 +204,7 @@ export declare namespace RpcClient {
  */
 export type FromGroup<Group, E = never> = RpcClient<RpcGroup.Rpcs<Group>, E>
 
-let requestIdCounter = BigInt(0)
+let requestIdCounter = 0
 
 /**
  * Creates an RPC client for an already-decoded message channel, returning the
@@ -681,7 +681,7 @@ export const make: <Rpcs extends Rpc.Any, const Flatten extends boolean = false>
             Effect.flatMap((payload) =>
               send(clientId, {
                 ...message,
-                id: String(message.id),
+                id: message.id,
                 payload,
                 headers: Object.entries(message.headers)
               }, collector && collector.readUnsafe())
@@ -693,7 +693,7 @@ export const make: <Rpcs extends Rpc.Any, const Flatten extends boolean = false>
           if (!entry) return Effect.void
           return send(clientId, {
             _tag: "Ack",
-            requestId: String(message.requestId)
+            requestId: message.requestId
           }) as Effect.Effect<void, RpcClientError>
         }
         case "Interrupt": {
@@ -702,7 +702,7 @@ export const make: <Rpcs extends Rpc.Any, const Flatten extends boolean = false>
           entries.delete(message.requestId)
           return send(clientId, {
             _tag: "Interrupt",
-            requestId: String(message.requestId)
+            requestId: message.requestId
           }) as Effect.Effect<void, RpcClientError>
         }
         case "Eof": {
@@ -887,6 +887,8 @@ export const makeProtocolHttp = (client: HttpClient.HttpClient): Effect.Effect<
       })
     const emptyResponseError = (request: FromClientEncoded) =>
       protocolDefect("Received empty HTTP response from RPC server", request)
+    const incompleteResponseError = (request: FromClientEncoded) =>
+      protocolDefect("HTTP response ended before RPC request completed", request)
 
     const send = Effect.fnUntraced(function*(clientId: number, request: FromClientEncoded) {
       if (request._tag !== "Request") {
@@ -914,15 +916,27 @@ export const makeProtocolHttp = (client: HttpClient.HttpClient): Effect.Effect<
         if (responses.length === 0) {
           return yield* emptyResponseError(request)
         }
+        let completed = false
         let i = 0
-        return yield* Effect.whileLoop({
+        yield* Effect.whileLoop({
           while: () => i < responses.length,
-          body: () => writeResponse(clientId, responses[i++]),
+          body: () => {
+            const response = responses[i++]
+            if (isTerminalResponse(response)) {
+              completed = true
+            }
+            return writeResponse(clientId, response)
+          },
           step: constVoid
         })
+        if (!completed) {
+          return yield* incompleteResponseError(request)
+        }
+        return
       }
 
       let hasResponse = false
+      let completed = false
       yield* Stream.runForEachArray(response.stream, (chunk) =>
         Effect.try({
           try: () => chunk.flatMap(parser.decode) as Array<FromServerEncoded>,
@@ -934,7 +948,13 @@ export const makeProtocolHttp = (client: HttpClient.HttpClient): Effect.Effect<
             let i = 0
             return Effect.whileLoop({
               while: () => i < responses.length,
-              body: () => writeResponse(clientId, responses[i++]),
+              body: () => {
+                const response = responses[i++]
+                if (isTerminalResponse(response)) {
+                  completed = true
+                }
+                return writeResponse(clientId, response)
+              },
               step: constVoid
             })
           })
@@ -943,6 +963,8 @@ export const makeProtocolHttp = (client: HttpClient.HttpClient): Effect.Effect<
         )
       if (!hasResponse) {
         return yield* emptyResponseError(request)
+      } else if (!completed) {
+        return yield* incompleteResponseError(request)
       }
     })
 
@@ -994,7 +1016,7 @@ export const makeProtocolSocket = (options?: {
     const socket = yield* Socket.Socket
     const serialization = yield* RpcSerialization.RpcSerialization
     const hooks = yield* Effect.serviceOption(ConnectionHooks)
-    const requestClientMap = new Map<string, number>()
+    const requestClientMap = new Map<string | number, number>()
 
     const write = yield* socket.writer
 
@@ -1114,9 +1136,10 @@ export const makeProtocolSocket = (options?: {
     }
   }))
 
-const defaultRetryPolicy = Schedule.exponential(500, 1.5).pipe(
-  Schedule.either(Schedule.spaced(5000))
-)
+const defaultRetryPolicy = Schedule.min([
+  Schedule.exponential(500, 1.5),
+  Schedule.spaced(5000)
+])
 
 const makePinger = Effect.fnUntraced(function*<A, E, R>(writePing: Effect.Effect<A, E, R>) {
   let recievedPong = true
@@ -1188,7 +1211,7 @@ export const makeProtocolWorker = (
     const initialMessage = yield* Effect.serviceOption(RpcWorker.InitialMessage)
     const hooks = yield* Effect.serviceOption(ConnectionHooks)
 
-    const entries = new Map<string, {
+    const entries = new Map<string | number, {
       readonly clientId: number
       readonly worker: Worker.Worker<FromServerEncoded, FromClientEncoded | RpcWorker.InitialMessage.Encoded>
       readonly latch: Latch.Latch

@@ -20,7 +20,7 @@ import type { LazyArg } from "./Function.ts"
 import { constant, constTrue, constUndefined, dual, identity } from "./Function.ts"
 import * as core from "./internal/core.ts"
 import * as internalEffect from "./internal/effect.ts"
-import type { ErrorWithStackTraceLimit } from "./internal/tracer.ts"
+import { getStackTraceLimit, setStackTraceLimit } from "./internal/stackTraceLimit.ts"
 import * as internalTracer from "./internal/tracer.ts"
 import { type Pipeable, pipeArguments } from "./Pipeable.ts"
 import { hasProperty } from "./Predicate.ts"
@@ -565,10 +565,10 @@ export const forkMemoMap = (parent: MemoMap): Effect<MemoMap> => internalEffect.
  * @since 3.13.0
  */
 export class CurrentMemoMap extends Context.Service<CurrentMemoMap, MemoMap>()("effect/Layer/CurrentMemoMap") {
-  static getOrCreate: <Services>(self: Context.Context<Services>) => MemoMap = Context.getOrElse(
-    this,
-    makeMemoMapUnsafe
-  )
+  static forkOrCreate<Services>(self: Context.Context<Services>): MemoMap {
+    const current = Context.getOrUndefined(self, CurrentMemoMap)
+    return current ? forkMemoMapUnsafe(current) : makeMemoMapUnsafe()
+  }
 }
 
 /**
@@ -677,7 +677,7 @@ export const build = <RIn, E, ROut>(
   core.withFiber((fiber) =>
     buildWithMemoMap(
       self,
-      CurrentMemoMap.getOrCreate(fiber.context),
+      CurrentMemoMap.forkOrCreate(fiber.context),
       Context.getUnsafe(fiber.context, Scope.Scope)
     )
   )
@@ -739,7 +739,7 @@ export const buildWithScope: {
   core.withFiber((fiber) =>
     buildWithMemoMap(
       self,
-      CurrentMemoMap.getOrCreate(fiber.context),
+      CurrentMemoMap.forkOrCreate(fiber.context),
       scope
     )
   ))
@@ -2276,10 +2276,10 @@ const mockImpl = <I, S extends object>(service: Context.Key<I, S>, implementatio
         if (prop in target) {
           return target[prop as keyof S]
         }
-        const prevLimit = (Error as ErrorWithStackTraceLimit).stackTraceLimit
-        ;(Error as ErrorWithStackTraceLimit).stackTraceLimit = 2
+        const prevLimit = getStackTraceLimit()
+        setStackTraceLimit(2)
         const error = new Error(`${service.key}: Unimplemented method "${prop.toString()}"`)
-        ;(Error as ErrorWithStackTraceLimit).stackTraceLimit = prevLimit
+        setStackTraceLimit(prevLimit)
         error.name = "UnimplementedError"
         return makeUnimplemented(error)
       },
@@ -2530,7 +2530,7 @@ export const span = (
  * that are built with this layer. This API does not create, end, or close the
  * span; the caller remains responsible for the span's lifetime.
  *
- * **Example** (Using an existing parent span)
+ * **Example** (Referencing an existing parent span)
  *
  * ```ts
  * import { Console, Context, Effect, Layer, Tracer } from "effect"

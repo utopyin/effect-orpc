@@ -48,6 +48,7 @@
   },
   "devDependencies": {
     "@types/bun": "latest",
+    "@types/node": "latest",
     "effect": "catalog:",
     "oxfmt": "^0.21.0",
     "oxlint": "^1.36.0",

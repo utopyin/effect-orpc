@@ -1,5 +1,11 @@
 # effect-orpc
 
+## 1.0.0-effect-v4.8
+
+### Patch Changes
+
+- f4a4deb: Support Effect 4.0.0-beta.98.
+
 ## 1.0.0-effect-v4.7
 
 ### Minor Changes

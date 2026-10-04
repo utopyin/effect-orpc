@@ -1,4 +1,4 @@
-import { BigDecimal, DateTime, Duration, HashMap, Option, Redacted, Result, Schema } from "effect"
+import { BigDecimal, DateTime, Duration, HashMap, Option, Redacted, Result, Schema, SchemaGetter } from "effect"
 import { describe, it } from "vitest"
 import { strictEqual } from "../utils/assert.ts"
 
@@ -152,6 +152,63 @@ describe("toFormatter", () => {
     strictEqual(format(1), "1")
   })
 
+  it("precompiles Union members", () => {
+    let derivations = 0
+    const String = Schema.String.pipe(
+      Schema.overrideToFormatter(() => {
+        derivations++
+        return (s) => s.toUpperCase()
+      })
+    )
+    const format = Schema.toFormatter(Schema.Union([String, Schema.Number, Schema.Never]))
+
+    strictEqual(derivations, 1)
+    strictEqual(format("a"), "A")
+    strictEqual(format("b"), "B")
+    strictEqual(derivations, 1)
+  })
+
+  it("selects transformed Union members on the Type side", () => {
+    const Target = Schema.Struct({ value: Schema.String }).pipe(
+      Schema.overrideToFormatter(() => (a) => `formatted:${a.value}`)
+    )
+    const Transformed = Schema.String.pipe(
+      Schema.decodeTo(Target, {
+        decode: SchemaGetter.transform((s) => ({ value: s })),
+        encode: SchemaGetter.transform((a) => a.value)
+      })
+    )
+    const format = Schema.toFormatter(Schema.Union([Transformed, Schema.Boolean]))
+
+    strictEqual(format({ value: "a" }), "formatted:a")
+  })
+
+  it("preserves Union member formatter annotations", () => {
+    const member = Schema.String.pipe(
+      Schema.flip,
+      Schema.check(Schema.makeFilter(() => true)),
+      Schema.flip,
+      Schema.overrideToFormatter(() => (s) => s.toUpperCase())
+    )
+    const format = Schema.toFormatter(Schema.Union([member, Schema.Number]))
+
+    strictEqual(format("a"), "A")
+  })
+
+  it("preserves Union member encoding metadata for onBefore", () => {
+    const member = Schema.String.pipe(
+      Schema.decode({
+        decode: SchemaGetter.transform((s) => s),
+        encode: SchemaGetter.transform((s) => s)
+      })
+    )
+    const format = Schema.toFormatter(Schema.Union([member, Schema.Number]), {
+      onBefore: (ast) => ast.encoding ? () => "transformed" : undefined
+    })
+
+    strictEqual(format("a"), "transformed")
+  })
+
   describe("Tuple", () => {
     it("empty", () => {
       const format = Schema.toFormatter(Schema.Tuple([]))
@@ -192,6 +249,30 @@ describe("toFormatter", () => {
       ])
     )
     strictEqual(format(["head", "tail", 1, true, "last"]), `["head", "tail", 1, true, "last"]`)
+  })
+
+  describe("rest elements", () => {
+    // Pairwise distinct, so a rest element read at the wrong index is observable.
+    const Tagged = (label: string) =>
+      Schema.String.pipe(Schema.overrideToFormatter(() => (s: string) => `${label}:${s}`))
+    const A = Tagged("A")
+    const B = Tagged("B")
+    const C = Tagged("C")
+
+    it("one trailing element after the rest element", () => {
+      const format = Schema.toFormatter(Schema.TupleWithRest(Schema.Tuple([A]), [B, C]))
+      strictEqual(format(["x", "z"]), `[A:x, C:z]`)
+      strictEqual(format(["x", "y", "z"]), `[A:x, B:y, C:z]`)
+      strictEqual(format(["x", "y1", "y2", "z"]), `[A:x, B:y1, B:y2, C:z]`)
+    })
+
+    it("multiple trailing elements after the rest element", () => {
+      const D = Tagged("D")
+      const format = Schema.toFormatter(Schema.TupleWithRest(Schema.Tuple([A]), [B, C, D]))
+      strictEqual(format(["x", "z", "w"]), `[A:x, C:z, D:w]`)
+      strictEqual(format(["x", "y", "z", "w"]), `[A:x, B:y, C:z, D:w]`)
+      strictEqual(format(["x", "y1", "y2", "z", "w"]), `[A:x, B:y1, B:y2, C:z, D:w]`)
+    })
   })
 
   describe("Struct", () => {
@@ -283,6 +364,27 @@ describe("toFormatter", () => {
   })
 
   describe("suspend", () => {
+    it("compiles a recursive schema once", () => {
+      interface Tree {
+        readonly a: number
+        readonly as: ReadonlyArray<Tree>
+      }
+      let compiled = 0
+      const Tree = Schema.Struct({
+        a: Schema.Number.pipe(Schema.overrideToFormatter(() => {
+          compiled++
+          return String
+        })),
+        as: Schema.Array(Schema.suspend((): Schema.Codec<Tree> => Tree))
+      })
+      const format = Schema.toFormatter(Tree)
+      strictEqual(
+        format({ a: 1, as: [{ a: 2, as: [{ a: 3, as: [] }] }] }),
+        `{ "a": 1, "as": [{ "a": 2, "as": [{ "a": 3, "as": [] }] }] }`
+      )
+      strictEqual(compiled, 1)
+    })
+
     it("Tuple", () => {
       const Rec = Schema.suspend((): Schema.Codec<unknown> => schema)
       const schema = Schema.Tuple([

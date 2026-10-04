@@ -5,17 +5,17 @@
  */
 import { NodeClusterSocket, NodeRuntime } from "@effect/platform-node"
 import { Effect, Layer, Ref, Schema } from "effect"
-import { ClusterSchema, Entity, TestRunner } from "effect/unstable/cluster"
-import { Rpc } from "effect/unstable/rpc"
-import type { SqlClient } from "effect/unstable/sql"
+import { ClusterSchema, Entity, TestRunner } from "effect/cluster"
+import { Rpc } from "effect/rpc"
+import type { SqlClient } from "effect/sql"
 
 export const Increment = Rpc.make("Increment", {
-  payload: { amount: Schema.Number },
-  success: Schema.Number
+  payload: { amount: Schema.Int },
+  success: Schema.Int
 })
 
 export const GetCount = Rpc.make("GetCount", {
-  success: Schema.Number
+  success: Schema.Int
 })
   // If you want GetCount messages to be persisted, you can annotate the RPC
   // schema with `ClusterSchema.Persisted`.

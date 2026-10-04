@@ -15,12 +15,11 @@ import * as Context from "effect/Context"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import * as Reactivity from "effect/reactivity/Reactivity"
 import * as Redacted from "effect/Redacted"
 import type { Scope } from "effect/Scope"
-import * as Stream from "effect/Stream"
-import * as Reactivity from "effect/unstable/reactivity/Reactivity"
-import * as Client from "effect/unstable/sql/SqlClient"
-import type { Connection } from "effect/unstable/sql/SqlConnection"
+import * as Client from "effect/sql/SqlClient"
+import type { Connection } from "effect/sql/SqlConnection"
 import {
   AuthenticationError,
   AuthorizationError,
@@ -33,9 +32,10 @@ import {
   StatementTimeoutError,
   UniqueViolation,
   UnknownError
-} from "effect/unstable/sql/SqlError"
-import { asyncPauseResume } from "effect/unstable/sql/SqlStream"
-import * as Statement from "effect/unstable/sql/Statement"
+} from "effect/sql/SqlError"
+import { asyncPauseResume } from "effect/sql/SqlStream"
+import * as Statement from "effect/sql/Statement"
+import * as Stream from "effect/Stream"
 import * as Mysql from "mysql2"
 
 const ATTR_DB_SYSTEM_NAME = "db.system.name"
@@ -153,7 +153,7 @@ export type TypeId = "~@effect/sql-mysql2/MysqlClient"
 /**
  * mysql2-backed SQL client service, extending `SqlClient` with its runtime type marker and client configuration.
  *
- * @category models
+ * @category services
  * @since 4.0.0
  */
 export interface MysqlClient extends Client.SqlClient {
@@ -194,7 +194,18 @@ export interface MysqlClientConfig {
   readonly maxConnections?: number | undefined
   readonly connectionTTL?: Duration.Input | undefined
 
+  /**
+   * Options passed directly to the `mysql2` connection pool.
+   *
+   * @stability unstable
+   */
   readonly poolConfig?: Mysql.PoolOptions | undefined
+
+  /**
+   * Use the text protocol instead of prepared statements, for proxies like
+   * Cloudflare Hyperdrive that do not support `COM_STMT_PREPARE`.
+   */
+  readonly disablePreparedStatements?: boolean | undefined
 
   readonly spanAttributes?: Record<string, unknown> | undefined
 
@@ -218,6 +229,7 @@ export const make = (
         options.transformResultNames
       ).array :
       undefined
+    const defaultMethod: "execute" | "query" = options.disablePreparedStatements === true ? "query" : "execute"
 
     class ConnectionImpl implements Connection {
       readonly conn: Mysql.PoolConnection | Mysql.Pool
@@ -229,7 +241,7 @@ export const make = (
         sql: string,
         values?: ReadonlyArray<any>,
         rowsAsArray = false,
-        method: "execute" | "query" = "execute"
+        method: "execute" | "query" = defaultMethod
       ) {
         return Effect.callback<unknown, SqlError>((resume) => {
           const operation = method === "query" ? "executeUnprepared" : "execute"
@@ -253,7 +265,7 @@ export const make = (
         sql: string,
         values?: ReadonlyArray<any>,
         rowsAsArray = false,
-        method: "execute" | "query" = "execute"
+        method: "execute" | "query" = defaultMethod
       ) {
         return this.runRaw(sql, values, rowsAsArray, method).pipe(
           Effect.map((results) => Array.isArray(results) ? results : [])
@@ -320,10 +332,10 @@ export const make = (
           : undefined,
         multipleStatements: true,
         supportBigNumbers: true,
-        connectionLimit: options.maxConnections,
+        connectionLimit: options.maxConnections ?? options.poolConfig?.connectionLimit,
         idleTimeout: options.connectionTTL
           ? Duration.toMillis(Duration.fromInputUnsafe(options.connectionTTL))
-          : undefined
+          : options.poolConfig?.idleTimeout
       } as Mysql.PoolOptions)
 
     yield* Effect.acquireRelease(
@@ -401,6 +413,7 @@ export const make = (
       yield* Client.make({
         acquirer: Effect.succeed(poolConnection),
         transactionAcquirer,
+        releaseSavepoint: (name) => `RELEASE SAVEPOINT ${name}`,
         compiler,
         spanAttributes,
         transformRows
@@ -448,7 +461,7 @@ export const layer = (
 /**
  * Creates the MySQL statement compiler, using `?` placeholders and backtick-escaped identifiers.
  *
- * @category compiler
+ * @category constructors
  * @since 4.0.0
  */
 export const makeCompiler = (transform?: (_: string) => string) =>

@@ -6,13 +6,24 @@
  * non-streaming or streaming response results back into Effect AI response
  * content and metadata.
  *
+ * @stability unstable
  * @since 4.0.0
  */
+import * as AiError from "effect/ai/AiError"
+import * as IdGenerator from "effect/ai/IdGenerator"
+import * as LanguageModel from "effect/ai/LanguageModel"
+import * as AiModel from "effect/ai/Model"
+import { toCodecOpenAI } from "effect/ai/OpenAiStructuredOutput"
+import type * as Prompt from "effect/ai/Prompt"
+import type * as Response from "effect/ai/Response"
+import * as Tool from "effect/ai/Tool"
 import * as Context from "effect/Context"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
-import * as Encoding from "effect/Encoding"
+import * as Base64 from "effect/encoding/Base64"
 import { dual } from "effect/Function"
+import type * as HttpClientRequest from "effect/http/HttpClientRequest"
+import type * as HttpClientResponse from "effect/http/HttpClientResponse"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
@@ -22,19 +33,9 @@ import * as AST from "effect/SchemaAST"
 import * as Stream from "effect/Stream"
 import type { Span } from "effect/Tracer"
 import type { DeepMutable, Mutable, Simplify } from "effect/Types"
-import * as AiError from "effect/unstable/ai/AiError"
-import * as IdGenerator from "effect/unstable/ai/IdGenerator"
-import * as LanguageModel from "effect/unstable/ai/LanguageModel"
-import * as AiModel from "effect/unstable/ai/Model"
-import { toCodecOpenAI } from "effect/unstable/ai/OpenAiStructuredOutput"
-import type * as Prompt from "effect/unstable/ai/Prompt"
-import type * as Response from "effect/unstable/ai/Response"
-import * as Tool from "effect/unstable/ai/Tool"
-import type * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
-import type * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
 import * as Generated from "./Generated.ts"
 import * as InternalUtilities from "./internal/utilities.ts"
-import { OpenAiClient } from "./OpenAiClient.ts"
+import { OpenAiClient, OpenAiSocket } from "./OpenAiClient.ts"
 import type * as OpenAiSchema from "./OpenAiSchema.ts"
 import { addGenAIAnnotations } from "./OpenAiTelemetry.ts"
 import type * as OpenAiTool from "./OpenAiTool.ts"
@@ -45,6 +46,7 @@ const SharedModelIds = Generated.ModelIdsShared.members[1]
 /**
  * OpenAI model identifiers supported by the Responses API language model.
  *
+ * @stability unstable
  * @category models
  * @since 4.0.0
  */
@@ -54,6 +56,8 @@ export type Model = typeof ResponseModelIds.Encoded | typeof SharedModelIds.Enco
  * Image detail level for vision requests.
  */
 type ImageDetail = "auto" | "low" | "high"
+
+type PromptCacheBreakpoint = { readonly mode: "explicit" }
 
 // =============================================================================
 // Configuration
@@ -74,6 +78,7 @@ type ImageDetail = "auto" | "low" | "high"
  *
  * @see {@link withConfigOverride} for scoping language model request overrides
  *
+ * @stability unstable
  * @category services
  * @since 4.0.0
  */
@@ -115,6 +120,16 @@ export class Config extends Context.Service<
        * Defaults to `true`.
        */
       readonly strictJsonSchema?: boolean | undefined
+      /**
+       * Whether stored response items should be sent as item references.
+       *
+       * Set to `false` for OpenAI-compatible providers that support response
+       * storage and `previous_response_id`, but require historical assistant
+       * content to be serialized inline.
+       *
+       * Defaults to `true` when `store` is `true`.
+       */
+      readonly useItemReferences?: boolean | undefined
     }
   >
 >()("@effect/ai-openai/OpenAiLanguageModel/Config") {}
@@ -123,11 +138,34 @@ export class Config extends Context.Service<
 // Provider Options / Metadata
 // =============================================================================
 
-declare module "effect/unstable/ai/Prompt" {
+declare module "effect/ai/Prompt" {
+  /**
+   * OpenAI-specific options for system messages.
+   *
+   * @stability unstable
+   * @category models
+   * @since 4.0.0
+   */
+  export interface SystemMessageOptions extends ProviderOptions {
+    /**
+     * Provider-specific system message options for the OpenAI Responses API.
+     */
+    readonly openai?: {
+      /**
+       * Marks the system input text as the end of a reusable prompt prefix.
+       *
+       * Requires GPT-5.6 or later. OpenAI may reject requests that use this
+       * option with earlier models.
+       */
+      readonly promptCacheBreakpoint?: PromptCacheBreakpoint | null
+    } | null
+  }
+
   /**
    * OpenAI-specific options for file prompt parts.
    *
-   * @category request
+   * @stability unstable
+   * @category models
    * @since 4.0.0
    */
   export interface FilePartOptions extends ProviderOptions {
@@ -145,7 +183,8 @@ declare module "effect/unstable/ai/Prompt" {
   /**
    * OpenAI-specific options for reasoning prompt parts.
    *
-   * @category request
+   * @stability unstable
+   * @category models
    * @since 4.0.0
    */
   export interface ReasoningPartOptions extends ProviderOptions {
@@ -169,7 +208,8 @@ declare module "effect/unstable/ai/Prompt" {
   /**
    * OpenAI-specific options for assistant tool-call prompt parts.
    *
-   * @category request
+   * @stability unstable
+   * @category models
    * @since 4.0.0
    */
   export interface ToolCallPartOptions extends ProviderOptions {
@@ -195,7 +235,8 @@ declare module "effect/unstable/ai/Prompt" {
   /**
    * OpenAI-specific options for tool-result prompt parts.
    *
-   * @category request
+   * @stability unstable
+   * @category models
    * @since 4.0.0
    */
   export interface ToolResultPartOptions extends ProviderOptions {
@@ -221,7 +262,8 @@ declare module "effect/unstable/ai/Prompt" {
   /**
    * OpenAI-specific options for text prompt parts.
    *
-   * @category request
+   * @stability unstable
+   * @category models
    * @since 4.0.0
    */
   export interface TextPartOptions extends ProviderOptions {
@@ -241,15 +283,23 @@ declare module "effect/unstable/ai/Prompt" {
        * A list of annotations that apply to the output text.
        */
       readonly annotations?: ReadonlyArray<typeof OpenAiSchema.Annotation.Encoded> | null
+      /**
+       * Marks the input text as the end of a reusable prompt prefix.
+       *
+       * Requires GPT-5.6 or later. OpenAI may reject requests that use this
+       * option with earlier models.
+       */
+      readonly promptCacheBreakpoint?: PromptCacheBreakpoint | null
     } | null
   }
 }
 
-declare module "effect/unstable/ai/Response" {
+declare module "effect/ai/Response" {
   /**
    * OpenAI metadata attached to a complete text response part.
    *
-   * @category response
+   * @stability unstable
+   * @category models
    * @since 4.0.0
    */
   export interface TextPartMetadata extends ProviderMetadata {
@@ -281,7 +331,8 @@ declare module "effect/unstable/ai/Response" {
   /**
    * OpenAI metadata emitted when a streamed text part starts.
    *
-   * @category response
+   * @stability unstable
+   * @category models
    * @since 4.0.0
    */
   export interface TextStartPartMetadata extends ProviderMetadata {
@@ -299,7 +350,8 @@ declare module "effect/unstable/ai/Response" {
   /**
    * OpenAI metadata emitted when a streamed text part ends.
    *
-   * @category response
+   * @stability unstable
+   * @category models
    * @since 4.0.0
    */
   export interface TextEndPartMetadata extends ProviderMetadata {
@@ -321,7 +373,8 @@ declare module "effect/unstable/ai/Response" {
   /**
    * OpenAI metadata attached to a complete reasoning response part.
    *
-   * @category response
+   * @stability unstable
+   * @category models
    * @since 4.0.0
    */
   export interface ReasoningPartMetadata extends ProviderMetadata {
@@ -343,7 +396,8 @@ declare module "effect/unstable/ai/Response" {
   /**
    * OpenAI metadata emitted when a streamed reasoning part starts.
    *
-   * @category response
+   * @stability unstable
+   * @category models
    * @since 4.0.0
    */
   export interface ReasoningStartPartMetadata extends ProviderMetadata {
@@ -365,7 +419,8 @@ declare module "effect/unstable/ai/Response" {
   /**
    * OpenAI metadata emitted for a streamed reasoning delta.
    *
-   * @category response
+   * @stability unstable
+   * @category models
    * @since 4.0.0
    */
   export interface ReasoningDeltaPartMetadata extends ProviderMetadata {
@@ -383,7 +438,8 @@ declare module "effect/unstable/ai/Response" {
   /**
    * OpenAI metadata emitted when a streamed reasoning part ends.
    *
-   * @category response
+   * @stability unstable
+   * @category models
    * @since 4.0.0
    */
   export interface ReasoningEndPartMetadata extends ProviderMetadata {
@@ -405,7 +461,8 @@ declare module "effect/unstable/ai/Response" {
   /**
    * OpenAI metadata attached to tool-call response parts.
    *
-   * @category response
+   * @stability unstable
+   * @category models
    * @since 4.0.0
    */
   export interface ToolCallPartMetadata extends ProviderMetadata {
@@ -423,7 +480,8 @@ declare module "effect/unstable/ai/Response" {
   /**
    * OpenAI metadata attached to document source citations.
    *
-   * @category response
+   * @stability unstable
+   * @category models
    * @since 4.0.0
    */
   export interface DocumentSourcePartMetadata extends ProviderMetadata {
@@ -479,7 +537,8 @@ declare module "effect/unstable/ai/Response" {
   /**
    * OpenAI metadata attached to URL source citations.
    *
-   * @category response
+   * @stability unstable
+   * @category models
    * @since 4.0.0
    */
   export interface UrlSourcePartMetadata extends ProviderMetadata {
@@ -505,7 +564,8 @@ declare module "effect/unstable/ai/Response" {
   /**
    * OpenAI metadata attached to finish response parts.
    *
-   * @category response
+   * @stability unstable
+   * @category models
    * @since 4.0.0
    */
   export interface FinishPartMetadata extends ProviderMetadata {
@@ -537,6 +597,7 @@ declare module "effect/unstable/ai/Response" {
  * @see {@link layer} for creating a `LanguageModel.LanguageModel` layer directly
  * @see {@link make} for constructing the language model service effectfully
  *
+ * @stability unstable
  * @category constructors
  * @since 4.0.0
  */
@@ -576,18 +637,19 @@ export const model = (
  * @see {@link layer} for providing the service as a `Layer`
  * @see {@link model} for creating a model descriptor for `Effect.provide`
  *
+ * @stability unstable
  * @category constructors
  * @since 4.0.0
  */
 export const make = Effect.fnUntraced(function*({ model, config: providerConfig }: {
   readonly model: (string & {}) | Model
   readonly config?: Omit<typeof Config.Service, "model"> | undefined
-}): Effect.fn.Return<LanguageModel.Service, never, OpenAiClient> {
+}): Effect.fn.Return<LanguageModel.LanguageModel, never, OpenAiClient> {
   const client = yield* OpenAiClient
 
   const makeConfig = Effect.gen(function*() {
     const services = yield* Effect.context<never>()
-    return { model, ...providerConfig, ...services.mapUnsafe.get(Config.key) }
+    return { model, ...providerConfig, ...Context.getOrUndefined(services, Config) }
   })
 
   const makeRequest = Effect.fnUntraced(
@@ -614,7 +676,12 @@ export const make = Effect.fnUntraced(function*({ model, config: providerConfig 
         config,
         options
       })
-      const { fileIdPrefixes: _fip, strictJsonSchema: _sjs, ...apiConfig } = config
+      const {
+        fileIdPrefixes: _fip,
+        strictJsonSchema: _sjs,
+        useItemReferences: _uir,
+        ...apiConfig
+      } = config
       const request: Mutable<typeof OpenAiSchema.CreateResponse.Encoded> = {
         ...apiConfig,
         input: messages,
@@ -696,6 +763,7 @@ export const make = Effect.fnUntraced(function*({ model, config: providerConfig 
  * @see {@link model} for creating a model descriptor for `Effect.provide`
  * @see {@link withConfigOverride} for scoped request configuration overrides
  *
+ * @stability unstable
  * @category layers
  * @since 4.0.0
  */
@@ -723,6 +791,7 @@ export const layer = (options: {
  *
  * @see {@link Config} for the scoped configuration service consumed by this function
  *
+ * @stability unstable
  * @category configuration
  * @since 4.0.0
  */
@@ -771,8 +840,12 @@ const prepareMessages = Effect.fnUntraced(
     readonly toolNameMapper: Tool.NameMapper<Tools>
   }): Effect.fn.Return<ReadonlyArray<typeof OpenAiSchema.InputItem.Encoded>, AiError.AiError> {
     const processedApprovalIds = new Set<string>()
+    const websocketMode = Option.isSome(yield* Effect.serviceOption(OpenAiSocket))
 
     const hasConversation = Predicate.isNotNullish(config.conversation)
+    const useItemReferences = config.store === true &&
+      config.useItemReferences !== false &&
+      options.incrementalFallback !== true
 
     // Provider-Defined Tools
     const applyPatchTool = options.tools.find((tool): tool is ReturnType<typeof OpenAiTool.ApplyPatch> =>
@@ -782,7 +855,7 @@ const prepareMessages = Effect.fnUntraced(
       Tool.isProviderDefined(tool) && tool.name === "OpenAiCodeInterpreter"
     )
     const shellTool = options.tools.find((tool): tool is ReturnType<typeof OpenAiTool.Shell> =>
-      Tool.isProviderDefined(tool) && tool.name === "OpenAiFunctionShell"
+      Tool.isProviderDefined(tool) && tool.name === "OpenAiShell"
     )
     const localShellTool = options.tools.find((tool): tool is ReturnType<typeof OpenAiTool.LocalShell> =>
       Tool.isProviderDefined(tool) && tool.name === "OpenAiLocalShell"
@@ -798,7 +871,7 @@ const prepareMessages = Effect.fnUntraced(
     if (Predicate.isNotUndefined(config.top_logprobs)) {
       include.add("message.output_text.logprobs")
     }
-    if (config.store === false && capabilities.isReasoningModel) {
+    if ((websocketMode || !useItemReferences) && capabilities.isReasoningModel) {
       include.add("reasoning.encrypted_content")
     }
     if (codeInterpreterTool) {
@@ -816,7 +889,11 @@ const prepareMessages = Effect.fnUntraced(
         case "system": {
           messages.push({
             role: getSystemMessageMode(config.model as string),
-            content: message.content
+            content: [{
+              type: "input_text",
+              text: message.content,
+              ...getPromptCacheBreakpoint(message)
+            }]
           })
           break
         }
@@ -829,7 +906,11 @@ const prepareMessages = Effect.fnUntraced(
 
             switch (part.type) {
               case "text": {
-                content.push({ type: "input_text", text: part.text })
+                content.push({
+                  type: "input_text",
+                  text: part.text,
+                  ...getPromptCacheBreakpoint(part)
+                })
                 break
               }
 
@@ -840,15 +921,14 @@ const prepareMessages = Effect.fnUntraced(
 
                   if (typeof part.data === "string" && isFileId(part.data, config)) {
                     content.push({ type: "input_image", file_id: part.data, detail })
-                  }
-
-                  if (part.data instanceof URL) {
-                    content.push({ type: "input_image", image_url: part.data.toString(), detail })
-                  }
-
-                  if (part.data instanceof Uint8Array) {
-                    const base64 = Encoding.encodeBase64(part.data)
-                    const imageUrl = `data:${mediaType};base64,${base64}`
+                  } else {
+                    const imageUrl = part.data instanceof URL
+                      ? part.data.toString()
+                      : part.data instanceof Uint8Array
+                      ? `data:${mediaType};base64,${Base64.encode(part.data)}`
+                      : /^(data:|https?:\/\/)/i.test(part.data)
+                      ? part.data
+                      : `data:${mediaType};base64,${part.data}`
                     content.push({ type: "input_image", image_url: imageUrl, detail })
                   }
                 } else if (part.mediaType === "application/pdf") {
@@ -861,7 +941,7 @@ const prepareMessages = Effect.fnUntraced(
                   }
 
                   if (part.data instanceof Uint8Array) {
-                    const base64 = Encoding.encodeBase64(part.data)
+                    const base64 = Base64.encode(part.data)
                     const fileName = part.fileName ?? `part-${index}.pdf`
                     const fileData = `data:application/pdf;base64,${base64}`
                     content.push({ type: "input_file", filename: fileName, file_data: fileData })
@@ -885,7 +965,20 @@ const prepareMessages = Effect.fnUntraced(
         }
 
         case "assistant": {
-          const reasoningMessages: Record<string, DeepMutable<typeof OpenAiSchema.ReasoningItem.Encoded>> = {}
+          const reasoningMessages: Record<string, DeepMutable<typeof OpenAiSchema.ReasoningItem.Encoded>> = Object
+            .create(null)
+
+          const providerExecutedParts = message.content.filter((part) =>
+            (part.type === "tool-call" || part.type === "tool-result") && part.providerExecuted
+          )
+          const unreplayableProviderItem = (name: string, id: string) =>
+            AiError.make({
+              module: "OpenAiLanguageModel",
+              method: "prepareMessages",
+              reason: new AiError.InvalidRequestError({
+                description: `Cannot replay provider-executed tool item '${name}' ('${id}') losslessly`
+              })
+            })
 
           for (const part of message.content) {
             switch (part.type) {
@@ -898,7 +991,7 @@ const prepareMessages = Effect.fnUntraced(
                   break
                 }
 
-                if (config.store === true && Predicate.isNotNull(id)) {
+                if (useItemReferences && Predicate.isNotNull(id)) {
                   messages.push({ type: "item_reference", id })
                   break
                 }
@@ -930,7 +1023,7 @@ const prepareMessages = Effect.fnUntraced(
                 if (Predicate.isNotNull(id)) {
                   const message = reasoningMessages[id]
 
-                  if (config.store === true) {
+                  if (useItemReferences) {
                     // Use item references to refer to reasoning (single reference)
                     // when the first part is encountered
                     if (Predicate.isUndefined(message)) {
@@ -984,12 +1077,101 @@ const prepareMessages = Effect.fnUntraced(
                   break
                 }
 
-                if (config.store && Predicate.isNotNull(id)) {
+                if (useItemReferences && Predicate.isNotNull(id)) {
                   messages.push({ type: "item_reference", id })
                   break
                 }
 
                 if (part.providerExecuted) {
+                  if (
+                    config.store !== true && options.incrementalFallback !== true
+                  ) {
+                    break
+                  }
+                  const result = providerExecutedParts.find((candidate) =>
+                    candidate.type === "tool-result" && candidate.id === part.id && candidate.name === part.name
+                  )
+                  if (Predicate.isUndefined(result) || result.type !== "tool-result") {
+                    return yield* unreplayableProviderItem(part.name, part.id)
+                  }
+                  if (
+                    Predicate.hasProperty(result.result, "type") &&
+                    result.result.type === "execution-denied"
+                  ) {
+                    break
+                  }
+
+                  const itemId = getItemId(part) ?? getItemId(result) ?? part.id
+                  switch (part.name) {
+                    case "OpenAiWebSearch":
+                    case "OpenAiWebSearchPreview": {
+                      if (!Predicate.hasProperty(result.result, "status")) {
+                        return yield* unreplayableProviderItem(part.name, part.id)
+                      }
+                      messages.push({
+                        type: "web_search_call",
+                        id: itemId,
+                        ...(Predicate.hasProperty(result.result, "action")
+                          ? { action: result.result.action }
+                          : undefined),
+                        status: result.result.status as string
+                      })
+                      break
+                    }
+                    case "OpenAiCodeInterpreter": {
+                      if (
+                        !Predicate.hasProperty(part.params, "code") ||
+                        !Predicate.hasProperty(part.params, "container_id") ||
+                        !Predicate.hasProperty(result.result, "status") ||
+                        !Predicate.hasProperty(result.result, "outputs")
+                      ) {
+                        return yield* unreplayableProviderItem(part.name, part.id)
+                      }
+                      messages.push({
+                        type: "code_interpreter_call",
+                        id: itemId,
+                        code: part.params.code as string | null,
+                        container_id: part.params.container_id as string,
+                        status: result.result.status as any,
+                        outputs: result.result.outputs as any
+                      })
+                      break
+                    }
+                    case "OpenAiFileSearch": {
+                      if (
+                        !Predicate.hasProperty(result.result, "status") ||
+                        !Predicate.hasProperty(result.result, "queries") ||
+                        !Predicate.hasProperty(result.result, "results")
+                      ) {
+                        return yield* unreplayableProviderItem(part.name, part.id)
+                      }
+                      messages.push({
+                        type: "file_search_call",
+                        id: itemId,
+                        status: result.result.status as string,
+                        queries: result.result.queries as Array<string>,
+                        results: result.result.results
+                      })
+                      break
+                    }
+                    case "OpenAiImageGeneration": {
+                      if (!Predicate.hasProperty(result.result, "result")) {
+                        return yield* unreplayableProviderItem(part.name, part.id)
+                      }
+                      messages.push({
+                        type: "image_generation_call",
+                        id: itemId,
+                        result: result.result.result as string | null,
+                        status: (Predicate.hasProperty(result.result, "status")
+                          ? result.result.status
+                          : "completed") as any
+                      })
+                      break
+                    }
+                    default: {
+                      return yield* unreplayableProviderItem(part.name, part.id)
+                    }
+                  }
                   break
                 }
 
@@ -1003,7 +1185,6 @@ const prepareMessages = Effect.fnUntraced(
                         method: "prepareMessages",
                         reason: new AiError.ToolParameterValidationError({
                           toolName: "local_shell",
-                          toolParams: part.params as Schema.Json,
                           description: error.message
                         })
                       })
@@ -1029,7 +1210,6 @@ const prepareMessages = Effect.fnUntraced(
                         method: "prepareMessages",
                         reason: new AiError.ToolParameterValidationError({
                           toolName: "shell",
-                          toolParams: part.params as Schema.Json,
                           description: error.message
                         })
                       })
@@ -1074,9 +1254,19 @@ const prepareMessages = Effect.fnUntraced(
                   break
                 }
 
-                if (config.store === true) {
+                if (useItemReferences) {
                   const id = getItemId(part) ?? part.id
                   messages.push({ type: "item_reference", id })
+                } else if (
+                  part.providerExecuted &&
+                  (config.store === true || options.incrementalFallback === true)
+                ) {
+                  const call = providerExecutedParts.find((candidate) =>
+                    candidate.type === "tool-call" && candidate.id === part.id && candidate.name === part.name
+                  )
+                  if (Predicate.isUndefined(call)) {
+                    return yield* unreplayableProviderItem(part.name, part.id)
+                  }
                 }
               }
             }
@@ -1094,7 +1284,7 @@ const prepareMessages = Effect.fnUntraced(
 
               processedApprovalIds.add(part.approvalId)
 
-              if (config.store === true) {
+              if (useItemReferences) {
                 messages.push({ type: "item_reference", id: part.approvalId })
               }
 
@@ -1129,6 +1319,7 @@ const prepareMessages = Effect.fnUntraced(
                 call_id: part.id,
                 ...(part.result as any)
               })
+              continue
             }
 
             if (Predicate.isNotUndefined(shellTool) && toolName === "shell") {
@@ -1139,6 +1330,7 @@ const prepareMessages = Effect.fnUntraced(
                 output: part.result as any,
                 ...(Predicate.isNotNull(status) ? { status } : {})
               })
+              continue
             }
 
             if (Predicate.isNotUndefined(localShellTool) && toolName === "local_shell") {
@@ -1149,12 +1341,13 @@ const prepareMessages = Effect.fnUntraced(
                 output: part.result as any,
                 ...(Predicate.isNotNull(status) ? { status } : {})
               })
+              continue
             }
 
             messages.push({
               type: "function_call_output",
               call_id: part.id,
-              output: JSON.stringify(part.result),
+              output: typeof part.result === "string" ? part.result : JSON.stringify(part.result),
               ...(Predicate.isNotNull(status) ? { status } : {})
             })
           }
@@ -1298,19 +1491,20 @@ const makeResponse = Effect.fnUntraced(
 
         case "code_interpreter_call": {
           const toolName = toolNameMapper.getCustomName("code_interpreter")
+          const status = part.status ?? "completed"
           parts.push({
             type: "tool-call",
             id: part.id,
             name: toolName,
-            params: { code: part.code, container_id: part.container_id },
+            params: { code: part.code ?? null, container_id: part.container_id },
             providerExecuted: true
           })
           parts.push({
             type: "tool-result",
             id: part.id,
             name: toolName,
-            isFailure: false,
-            result: { outputs: part.outputs },
+            isFailure: status !== "completed",
+            result: { status, outputs: part.outputs ?? null },
             providerExecuted: true
           })
           break
@@ -1329,7 +1523,7 @@ const makeResponse = Effect.fnUntraced(
             type: "tool-result",
             id: part.id,
             name: toolName,
-            isFailure: false,
+            isFailure: part.status !== "completed",
             result: {
               status: part.status,
               queries: part.queries,
@@ -1353,7 +1547,6 @@ const makeResponse = Effect.fnUntraced(
                 method: "makeResponse",
                 reason: new AiError.ToolParameterValidationError({
                   toolName,
-                  toolParams: {},
                   description: `Faled to securely JSON parse tool parameters: ${cause}`
                 })
               })
@@ -1373,6 +1566,7 @@ const makeResponse = Effect.fnUntraced(
 
         case "image_generation_call": {
           const toolName = toolNameMapper.getCustomName("image_generation")
+          const status = part.status ?? "completed"
           parts.push({
             type: "tool-call",
             id: part.id,
@@ -1384,8 +1578,10 @@ const makeResponse = Effect.fnUntraced(
             type: "tool-result",
             id: part.id,
             name: toolName,
-            isFailure: false,
-            result: { result: part.result }
+            isFailure: status !== "completed",
+            result: status === "completed"
+              ? { result: part.result }
+              : { status, result: part.result }
           })
           break
         }
@@ -1425,7 +1621,7 @@ const makeResponse = Effect.fnUntraced(
             type: "tool-result",
             id: toolId,
             name: toolName,
-            isFailure: false,
+            isFailure: Predicate.isNotNullish(part.error),
             providerExecuted: true,
             result: {
               type: "mcp_call",
@@ -1614,15 +1810,20 @@ const makeResponse = Effect.fnUntraced(
             type: "tool-call",
             id: part.id,
             name: toolName,
-            params: {},
+            params: webSearchTool?.name === "OpenAiWebSearchPreview" || Predicate.isUndefined(part.action)
+              ? {}
+              : { action: part.action },
             providerExecuted: true
           })
           parts.push({
             type: "tool-result",
             id: part.id,
             name: toolName,
-            isFailure: false,
-            result: { action: part.action, status: part.status },
+            isFailure: part.status !== "completed",
+            result: {
+              ...(Predicate.isUndefined(part.action) ? undefined : { action: part.action }),
+              status: part.status
+            },
             providerExecuted: true
           })
           break
@@ -1666,6 +1867,7 @@ const makeStreamResponse = Effect.fnUntraced(
     IdGenerator.IdGenerator
   > {
     const idGenerator = yield* IdGenerator.IdGenerator
+    const websocketMode = Option.isSome(yield* Effect.serviceOption(OpenAiSocket))
 
     const approvalRequests = getApprovalRequestIdMapping(options.prompt)
     const streamApprovalRequests = new Map<string, string>()
@@ -1682,7 +1884,7 @@ const makeStreamResponse = Effect.fnUntraced(
     }
 
     // Track active reasoning items with state machine for proper concluding logic
-    const activeReasoning: Record<string, ReasoningPart> = {}
+    const activeReasoning: Record<string, ReasoningPart> = Object.create(null)
 
     const getOrCreateReasoningPart = (
       itemId: string,
@@ -1717,8 +1919,38 @@ const makeStreamResponse = Effect.fnUntraced(
       }
       readonly codeInterpreter?: {
         readonly containerId: string
+        hasCode: boolean
+        streamedCode: string
       }
     }> = {}
+
+    const finishCodeInterpreterCall = (
+      outputIndex: number,
+      code: string | null,
+      parts: Array<Response.StreamPartEncoded>
+    ) => {
+      const toolCall = activeToolCalls[outputIndex]
+      if (Predicate.isUndefined(toolCall?.codeInterpreter)) {
+        return
+      }
+      parts.push({
+        type: "tool-params-delta",
+        id: toolCall.id,
+        delta: toolCall.codeInterpreter.hasCode ? "\"}" : `${JSON.stringify(code)}}`
+      })
+      parts.push({ type: "tool-params-end", id: toolCall.id })
+      parts.push({
+        type: "tool-call",
+        id: toolCall.id,
+        name: toolCall.name,
+        params: {
+          code: toolCall.codeInterpreter.hasCode ? toolCall.codeInterpreter.streamedCode : code,
+          container_id: toolCall.codeInterpreter.containerId
+        },
+        providerExecuted: true
+      })
+      delete activeToolCalls[outputIndex]
+    }
 
     const webSearchTool = options.tools.find((tool) =>
       Tool.isProviderDefined(tool) &&
@@ -1753,14 +1985,27 @@ const makeStreamResponse = Effect.fnUntraced(
           }
 
           case "response.completed":
-          case "response.incomplete":
-          case "response.failed": {
+          case "response.incomplete": {
             parts.push({
               type: "finish",
               reason: InternalUtilities.resolveFinishReason(
                 event.response.incomplete_details?.reason,
                 hasToolCalls
               ),
+              usage: getUsage(event.response.usage),
+              response: buildHttpResponseDetails(response),
+              ...toServiceTier(event.response.service_tier)
+            })
+            break
+          }
+
+          case "response.failed": {
+            if (event.response.error) {
+              parts.push({ type: "error", error: event.response.error })
+            }
+            parts.push({
+              type: "finish",
+              reason: "error",
               usage: getUsage(event.response.usage),
               response: buildHttpResponseDetails(response),
               ...toServiceTier(event.response.service_tier)
@@ -1818,7 +2063,7 @@ const makeStreamResponse = Effect.fnUntraced(
                 activeToolCalls[event.output_index] = {
                   id: event.item.id,
                   name: toolName,
-                  codeInterpreter: { containerId: event.item.container_id }
+                  codeInterpreter: { containerId: event.item.container_id, hasCode: false, streamedCode: "" }
                 }
                 parts.push({
                   type: "tool-params-start",
@@ -1829,7 +2074,7 @@ const makeStreamResponse = Effect.fnUntraced(
                 parts.push({
                   type: "tool-params-delta",
                   id: event.item.id,
-                  delta: `{"containerId":"${event.item.container_id}","code":"`
+                  delta: `{"container_id":${JSON.stringify(event.item.container_id)},"code":`
                 })
                 break
               }
@@ -1942,6 +2187,9 @@ const makeStreamResponse = Effect.fnUntraced(
                   id: event.item.id,
                   name: toolName
                 }
+                if (webSearchTool?.name === "OpenAiWebSearch") {
+                  break
+                }
                 parts.push({
                   type: "tool-params-start",
                   id: event.item.id,
@@ -2009,14 +2257,15 @@ const makeStreamResponse = Effect.fnUntraced(
               }
 
               case "code_interpreter_call": {
-                delete activeToolCalls[event.output_index]
+                finishCodeInterpreterCall(event.output_index, event.item.code ?? null, parts)
                 const toolName = toolNameMapper.getCustomName("code_interpreter")
+                const status = event.item.status ?? "completed"
                 parts.push({
                   type: "tool-result",
                   id: event.item.id,
                   name: toolName,
-                  isFailure: false,
-                  result: { outputs: event.item.outputs },
+                  isFailure: status !== "completed",
+                  result: { status, outputs: event.item.outputs ?? null },
                   providerExecuted: true
                 })
                 break
@@ -2049,15 +2298,16 @@ const makeStreamResponse = Effect.fnUntraced(
               case "file_search_call": {
                 delete activeToolCalls[event.output_index]
                 const toolName = toolNameMapper.getCustomName("file_search")
-                const results = Predicate.isNotNullish(event.item.results)
-                  ? { results: event.item.results }
-                  : undefined
                 parts.push({
                   type: "tool-result",
                   id: event.item.id,
                   name: toolName,
-                  isFailure: false,
-                  result: { ...results, status: event.item.status, queries: event.item.queries },
+                  isFailure: event.item.status !== "completed",
+                  result: {
+                    status: event.item.status,
+                    queries: event.item.queries,
+                    results: event.item.results ?? null
+                  },
                   providerExecuted: true
                 })
                 break
@@ -2084,7 +2334,6 @@ const makeStreamResponse = Effect.fnUntraced(
                       method: "makeStreamResponse",
                       reason: new AiError.ToolParameterValidationError({
                         toolName,
-                        toolParams: {},
                         description: `Failed securely JSON parse tool parameters: ${cause}`
                       })
                     })
@@ -2110,12 +2359,15 @@ const makeStreamResponse = Effect.fnUntraced(
 
               case "image_generation_call": {
                 const toolName = toolNameMapper.getCustomName("image_generation")
+                const status = event.item.status ?? "completed"
                 parts.push({
                   type: "tool-result",
                   id: event.item.id,
                   name: toolName,
-                  isFailure: false,
-                  result: { result: event.item.result },
+                  isFailure: status !== "completed",
+                  result: status === "completed"
+                    ? { result: event.item.result }
+                    : { status, result: event.item.result },
                   providerExecuted: true
                 })
                 break
@@ -2160,7 +2412,7 @@ const makeStreamResponse = Effect.fnUntraced(
                   type: "tool-result",
                   id: toolId,
                   name: toolName,
-                  isFailure: false,
+                  isFailure: Predicate.isNotNullish(event.item.error),
                   providerExecuted: true,
                   result: {
                     type: "mcp_call",
@@ -2255,12 +2507,24 @@ const makeStreamResponse = Effect.fnUntraced(
                 const toolName = toolNameMapper.getCustomName(
                   webSearchTool?.name ?? "web_search"
                 )
+                if (webSearchTool?.name === "OpenAiWebSearch") {
+                  parts.push({
+                    type: "tool-call",
+                    id: event.item.id,
+                    name: toolName,
+                    params: Predicate.isUndefined(event.item.action) ? {} : { action: event.item.action },
+                    providerExecuted: true
+                  })
+                }
                 parts.push({
                   type: "tool-result",
                   id: event.item.id,
                   name: toolName,
-                  isFailure: false,
-                  result: { action: event.item.action, status: event.item.status },
+                  isFailure: event.item.status !== "completed",
+                  result: {
+                    ...(Predicate.isUndefined(event.item.action) ? undefined : { action: event.item.action }),
+                    status: event.item.status
+                  },
                   providerExecuted: true
                 })
                 break
@@ -2378,7 +2642,6 @@ const makeStreamResponse = Effect.fnUntraced(
                     method: "makeStreamResponse",
                     reason: new AiError.ToolParameterValidationError({
                       toolName: toolCall.name,
-                      toolParams: {},
                       description: `Failed securely JSON parse tool parameters: ${cause}`
                     })
                   })
@@ -2444,37 +2707,21 @@ const makeStreamResponse = Effect.fnUntraced(
 
           case "response.code_interpreter_call_code.delta": {
             const toolCall = activeToolCalls[event.output_index]
-            if (Predicate.isNotUndefined(toolCall)) {
+            if (Predicate.isNotUndefined(toolCall?.codeInterpreter)) {
               parts.push({
                 type: "tool-params-delta",
                 id: toolCall.id,
-                delta: InternalUtilities.escapeJSONDelta(event.delta)
+                delta: (toolCall.codeInterpreter.hasCode ? "" : "\"") +
+                  InternalUtilities.escapeJSONDelta(event.delta)
               })
+              toolCall.codeInterpreter.hasCode = true
+              toolCall.codeInterpreter.streamedCode += event.delta
             }
             break
           }
 
           case "response.code_interpreter_call_code.done": {
-            const toolCall = activeToolCalls[event.output_index]
-            if (Predicate.isNotUndefined(toolCall) && Predicate.isNotUndefined(toolCall.codeInterpreter)) {
-              const toolName = toolNameMapper.getCustomName("code_interpreter")
-              parts.push({
-                type: "tool-params-delta",
-                id: toolCall.id,
-                delta: "\"}"
-              })
-              parts.push({ type: "tool-params-end", id: toolCall.id })
-              parts.push({
-                type: "tool-call",
-                id: toolCall.id,
-                name: toolName,
-                params: {
-                  code: event.code,
-                  container_id: toolCall.codeInterpreter.containerId
-                },
-                providerExecuted: true
-              })
-            }
+            finishCodeInterpreterCall(event.output_index, event.code, parts)
             break
           }
 
@@ -2541,9 +2788,9 @@ const makeStreamResponse = Effect.fnUntraced(
 
           case "response.reasoning_summary_part.done": {
             const reasoningPart = getOrCreateReasoningPart(event.item_id)
-            // When OpenAI stores message data, we can immediately conclude the
-            // reasoning part given that we do not need the encrypted content
-            if (config.store === true) {
+            // HTTP requests using stored item references do not need encrypted
+            // content, so the reasoning part can be concluded immediately.
+            if (!websocketMode && config.store === true && config.useItemReferences !== false) {
               parts.push({
                 type: "reasoning-end",
                 id: `${event.item_id}:${event.summary_index}`,
@@ -2876,6 +3123,13 @@ const getEncryptedContent = (
 
 const getImageDetail = (part: Prompt.FilePart): ImageDetail => part.options.openai?.imageDetail ?? "auto"
 
+const getPromptCacheBreakpoint = (
+  input: Prompt.SystemMessage | Prompt.TextPart
+) => {
+  const promptCacheBreakpoint = input.options.openai?.promptCacheBreakpoint
+  return Predicate.isNotNullish(promptCacheBreakpoint) ? { prompt_cache_breakpoint: promptCacheBreakpoint } : undefined
+}
+
 const makeItemIdMetadata = (itemId: string | undefined) => Predicate.isNotUndefined(itemId) ? { itemId } : {}
 
 const makeEncryptedContentMetadata = (encryptedContent: string | null | undefined) =>
@@ -3025,7 +3279,6 @@ const normalizeMcpToolCall = Effect.fnUntraced(function*<Tools extends ReadonlyA
         method,
         reason: new AiError.ToolParameterValidationError({
           toolName,
-          toolParams,
           description: `Failed to securely JSON parse tool parameters: ${cause}`
         })
       })
@@ -3053,15 +3306,16 @@ const getUsage = (usage: OpenAiSchema.ResponseUsage | null | undefined): Respons
 
   const inputTokens = usage.input_tokens
   const outputTokens = usage.output_tokens
-  const cachedTokens = getUsageTokenDetail(usage.input_tokens_details, "cached_tokens")
-  const reasoningTokens = getUsageTokenDetail(usage.output_tokens_details, "reasoning_tokens")
+  const cachedTokens = getUsageTokenDetail(usage.input_tokens_details, "cached_tokens") ?? 0
+  const cacheWriteTokens = getUsageTokenDetail(usage.input_tokens_details, "cache_write_tokens")
+  const reasoningTokens = getUsageTokenDetail(usage.output_tokens_details, "reasoning_tokens") ?? 0
 
   return {
     inputTokens: {
       uncached: inputTokens - cachedTokens,
       total: inputTokens,
       cacheRead: cachedTokens,
-      cacheWrite: undefined
+      cacheWrite: cacheWriteTokens
     },
     outputTokens: {
       total: outputTokens,
@@ -3092,8 +3346,8 @@ const toServiceTier = (value: string | undefined): {
   }
 }
 
-const getUsageTokenDetail = (details: unknown, key: string): number =>
-  Predicate.hasProperty(details, key) && typeof details[key] === "number" ? details[key] : 0
+const getUsageTokenDetail = (details: unknown, key: string): number | undefined =>
+  Predicate.hasProperty(details, key) && typeof details[key] === "number" ? details[key] : undefined
 
 const transformToolCallParams = Effect.fnUntraced(function*<Tools extends ReadonlyArray<Tool.Any>>(
   tools: Tools,
@@ -3113,21 +3367,19 @@ const transformToolCallParams = Effect.fnUntraced(function*<Tools extends Readon
     })
   }
 
+  if (Tool.isDynamic(tool) && tool.jsonSchema !== undefined) {
+    return toolParams
+  }
+
   const { codec } = yield* tryCodecTransform(tool.parametersSchema, "makeResponse")
 
-  const transform = Schema.decodeEffect(codec)
-
+  // Normalize valid parameters; leave invalid ones for Toolkit.
   return yield* (
-    transform(toolParams) as Effect.Effect<unknown, Schema.SchemaError>
-  ).pipe(Effect.mapError((error) =>
-    AiError.make({
-      module: "OpenAiLanguageModel",
-      method: "makeResponse",
-      reason: new AiError.ToolParameterValidationError({
-        toolName,
-        toolParams,
-        description: error.issue.toString()
-      })
-    })
-  ))
+    Schema.decodeEffect(codec)(toolParams) as Effect.Effect<unknown, Schema.SchemaError>
+  ).pipe(
+    Effect.flatMap((decoded) =>
+      Schema.encodeUnknownEffect(tool.parametersSchema)(decoded) as Effect.Effect<unknown, Schema.SchemaError>
+    ),
+    Effect.orElseSucceed(() => toolParams)
+  )
 })

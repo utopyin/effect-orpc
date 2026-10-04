@@ -1,4 +1,4 @@
-import { assertFalse, assertNone, assertSome, assertTrue, deepStrictEqual } from "@effect/vitest/utils"
+import { assertFalse, assertNone, assertSome, assertTrue, deepStrictEqual, strictEqual } from "@effect/vitest/utils"
 import { Equivalence, Number as Num, Option, Record, Result } from "effect"
 import { pipe } from "effect/Function"
 import { describe, it } from "vitest"
@@ -61,6 +61,11 @@ describe("Record", () => {
       })
 
       deepStrictEqual(Record.fromIterableBy(["a", symA], (s) => s), { a: "a", [symA]: symA })
+
+      deepStrictEqual(pipe(users, Record.fromIterableBy((user) => user.id)), {
+        "2": { id: "2", name: "name2" },
+        "1": { id: "1", name: "name1" }
+      })
     })
 
     it("fromEntries", () => {
@@ -159,6 +164,20 @@ describe("Record", () => {
       })
     })
 
+    describe("assignProperty", () => {
+      it("preserves __proto__ as an own property", () => {
+        const record: Record<string, unknown> = {}
+        const prototype = Object.getPrototypeOf(record)
+        const value = { polluted: true }
+
+        Record.assignProperty(record, "__proto__", value)
+
+        strictEqual(Object.getPrototypeOf(record), prototype)
+        assertTrue(Object.hasOwn(record, "__proto__"))
+        strictEqual(record["__proto__"], value)
+      })
+    })
+
     it("singleton", () => {
       deepStrictEqual(Record.singleton("a", 1), { a: 1 })
 
@@ -201,13 +220,13 @@ describe("Record", () => {
     it("partition", () => {
       const f = (n: number) => (n > 2 ? Result.succeed(n + 1) : Result.fail(n - 1))
       deepStrictEqual(Record.partition({}, f), [{}, {}])
-      deepStrictEqual(Record.partition({ a: 1, b: 3, [symA]: null }, f), [{ a: 0 }, { b: 4 }])
+      deepStrictEqual(Record.partition({ a: 1, b: 3, [symA]: null }, f), [{ b: 4 }, { a: 0 }])
     })
 
     it("separate", () => {
       deepStrictEqual(
         Record.separate({ a: Result.fail("e"), b: Result.succeed(1), [symA]: null }),
-        [{ a: "e" }, { b: 1 }]
+        [{ b: 1 }, { a: "e" }]
       )
       // should ignore non own properties
       const o: Record.ReadonlyRecord<"a", Result.Result<number, string>> = Object.create({ a: 1 })

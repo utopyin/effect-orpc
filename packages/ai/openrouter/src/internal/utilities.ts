@@ -1,5 +1,5 @@
+import type * as Response from "effect/ai/Response"
 import * as Predicate from "effect/Predicate"
-import type * as Response from "effect/unstable/ai/Response"
 import type { ReasoningDetails } from "../OpenRouterLanguageModel.ts"
 
 const finishReasonMap: Record<string, Response.FinishReason> = {
@@ -14,10 +14,12 @@ const finishReasonMap: Record<string, Response.FinishReason> = {
 /** @internal */
 export const resolveFinishReason = (
   finishReason: string | null | undefined
-): Response.FinishReason =>
-  Predicate.isNotNullish(finishReason)
-    ? finishReasonMap[finishReason]
-    : "other"
+): Response.FinishReason => {
+  if (Predicate.isNullish(finishReason)) {
+    return "other"
+  }
+  return Object.hasOwn(finishReasonMap, finishReason) ? finishReasonMap[finishReason] : "unknown"
+}
 
 /**
  * Tracks ReasoningDetailUnion entries and deduplicates them based

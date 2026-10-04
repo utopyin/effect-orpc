@@ -4,6 +4,9 @@ A type-safe integration between [oRPC](https://orpc.dev/) and [Effect](https://e
 
 Inspired by [effect-trpc](https://github.com/mikearnaldi/effect-trpc).
 
+> [!TIP]
+> oRPC has released their v2 version in beta, and it will come with an [integration for Effect](https://orpc.dev/docs/integrations/effect). This package focuses solely on oRPC v1.
+
 ## Features
 
 - **Effect-native procedures** - Write oRPC procedures using generators with `yield*` syntax

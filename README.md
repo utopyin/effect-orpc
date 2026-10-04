@@ -29,7 +29,7 @@ Runnable demos live in the repository's `examples/` directory.
 
 ```ts
 import { os } from "@orpc/server";
-import { Effect, ManagedRuntime } from "effect";
+import { Context, Effect, Layer, ManagedRuntime } from "effect";
 import { eos, makeEffectORPC, ORPCTaggedError } from "effect-orpc";
 
 interface User {
@@ -44,12 +44,14 @@ let users: User[] = [
 ];
 
 // Define your services
-class UsersRepo extends Effect.Service<UsersRepo>()("UsersRepo", {
-  accessors: true,
-  sync: () => ({
-    get: (id: number) => users.find((u) => u.id === id),
-  }),
-}) {}
+class UsersRepo extends Context.Service<
+  UsersRepo,
+  { get: (id: number) => User | undefined }
+>()("UsersRepo") {
+  static readonly layer = Layer.succeed(this, {
+    get: (id) => users.find((u) => u.id === id),
+  });
+}
 
 // Special yieldable oRPC error class
 class UserNotFoundError extends ORPCTaggedError("UserNotFoundError", {
@@ -59,7 +61,7 @@ class UserNotFoundError extends ORPCTaggedError("UserNotFoundError", {
 // Create an Effect-aware oRPC builder with your service layer, context, errors,
 // and middleware.
 const effectProcedure = eos
-  .provide(UsersRepo.Default)
+  .provide(UsersRepo.layer)
   .errors({ UNAUTHORIZED: { status: 401 }, UserNotFoundError })
   .$context<{ userId?: number }>()
   .use(({ context, errors, next }) => {
@@ -69,7 +71,7 @@ const effectProcedure = eos
 
 // Use ManagedRuntime only when scoped resources should be acquired once and
 // released on shutdown, for example a shared cache, database pool, or telemetry SDK:
-// const runtime = ManagedRuntime.make(UsersRepo.Default);
+// const runtime = ManagedRuntime.make(UsersRepo.layer);
 // const effectProcedure = makeEffectORPC(runtime).errors({ UserNotFoundError });
 
 // Create the router with mixed procedures
@@ -77,7 +79,8 @@ export const router = {
   health: os.handler(() => "ok"),
   users: {
     me: effectProcedure.effect(function* ({ context: { userId } }) {
-      const user = yield* UsersRepo.get(userId);
+      const usersRepo = yield* UsersRepo;
+      const user = usersRepo.get(userId);
       if (!user) {
         return yield* new UserNotFoundError();
       }
@@ -155,7 +158,8 @@ const getUser = effectProcedure
     // ^^^ same code as the `UserNotFoundError` error key, defined at the class level
   })
   .effect(function* ({ input, errors }) {
-    const user = yield* UsersRepo.findById(input.id);
+    const usersRepo = yield* UsersRepo;
+    const user = usersRepo.findById(input.id);
     if (!user) {
       return yield* new UserNotFoundError();
       // or return `yield* Effect.fail(errors.USER_NOT_FOUND())`
@@ -429,17 +433,19 @@ The main package stays runtime-agnostic; `/node` is separate because the bridge 
 Use `implementEffect(contract, layerOrRuntime)` when you already have an oRPC contract and want to keep contract-first enforcement while adding Effect-native handlers. Use `eos.provide(layer)` when you want to build procedures directly from the default Effect-aware builder.
 
 ```ts
-import { Effect } from "effect";
+import { Context, Layer } from "effect";
 import { eoc, implementEffect } from "effect-orpc";
 import z from "zod";
 
-class UsersRepo extends Effect.Service<UsersRepo>()("UsersRepo", {
-  accessors: true,
-  sync: () => ({
-    list: (amount: number) =>
+class UsersRepo extends Context.Service<
+  UsersRepo,
+  { list: (amount: number) => string[] }
+>()("UsersRepo") {
+  static readonly layer = Layer.succeed(this, {
+    list: (amount) =>
       Array.from({ length: amount }, (_, index) => `user-${index + 1}`),
-  }),
-}) {}
+  });
+}
 
 const contract = {
   users: {
@@ -449,12 +455,13 @@ const contract = {
   },
 };
 
-const oe = implementEffect(contract, UsersRepo.Default);
+const oe = implementEffect(contract, UsersRepo.layer);
 
 export const router = oe.router({
   users: {
     list: oe.users.list.effect(function* ({ input }) {
-      return yield* UsersRepo.list(input.amount);
+      const usersRepo = yield* UsersRepo;
+      return usersRepo.list(input.amount);
     }),
   },
 });
@@ -506,7 +513,8 @@ const oe = implementEffect(contract, AppLive);
 const router = oe.router({
   users: {
     list: oe.users.list.effect(function* ({ input }) {
-      return yield* UsersRepo.list(input.amount);
+      const usersRepo = yield* UsersRepo;
+      return usersRepo.list(input.amount);
     }),
   },
 });

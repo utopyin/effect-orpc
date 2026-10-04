@@ -27,6 +27,7 @@
         "@orpc/server": "^1.13.4",
         "@orpc/zod": "^1.13.4",
         "@types/bun": "latest",
+        "@types/node": "latest",
         "effect": "catalog:",
         "effect-orpc": "workspace:*",
         "hono": "^4.11.4",

@@ -44,8 +44,8 @@ import type {
   MergedEffectErrorMap,
 } from "../tagged-error";
 
-type EffectTagIdentifier<T extends EffectContext.Tag<any, any>> =
-  T extends EffectContext.Tag<infer I, any> ? I : never;
+type EffectTagIdentifier<T extends EffectContext.Key<any, any>> =
+  T extends EffectContext.Key<infer I, any> ? I : never;
 
 export interface EffectBuilderWithMiddlewares<
   TInitialContext extends Context,
@@ -147,7 +147,7 @@ export interface EffectBuilderWithMiddlewares<
   /**
    * Provides a request-scoped Effect service to downstream procedures.
    */
-  "provide"<TTag extends EffectContext.Tag<any, any>>(
+  "provide"<TTag extends EffectContext.Key<any, any>>(
     tag: TTag,
     provider: EffectProvider<
       TCurrentContext,
@@ -171,7 +171,7 @@ export interface EffectBuilderWithMiddlewares<
   /**
    * Optionally provides a request-scoped Effect service to downstream procedures.
    */
-  "provideOptional"<TTag extends EffectContext.Tag<any, any>>(
+  "provideOptional"<TTag extends EffectContext.Key<any, any>>(
     tag: TTag,
     provider: EffectOptionalProvider<
       TCurrentContext,
@@ -501,7 +501,7 @@ export interface EffectProcedureBuilder<
   /**
    * Provides a request-scoped Effect service to downstream procedures.
    */
-  "provide"<TTag extends EffectContext.Tag<any, any>>(
+  "provide"<TTag extends EffectContext.Key<any, any>>(
     tag: TTag,
     provider: EffectProvider<
       TCurrentContext,
@@ -525,7 +525,7 @@ export interface EffectProcedureBuilder<
   /**
    * Optionally provides a request-scoped Effect service to downstream procedures.
    */
-  "provideOptional"<TTag extends EffectContext.Tag<any, any>>(
+  "provideOptional"<TTag extends EffectContext.Key<any, any>>(
     tag: TTag,
     provider: EffectOptionalProvider<
       TCurrentContext,
@@ -829,7 +829,7 @@ export interface EffectProcedureBuilderWithInput<
   /**
    * Provides a request-scoped Effect service to downstream procedures.
    */
-  "provide"<TTag extends EffectContext.Tag<any, any>>(
+  "provide"<TTag extends EffectContext.Key<any, any>>(
     tag: TTag,
     provider: EffectProvider<
       TCurrentContext,
@@ -853,7 +853,7 @@ export interface EffectProcedureBuilderWithInput<
   /**
    * Optionally provides a request-scoped Effect service to downstream procedures.
    */
-  "provideOptional"<TTag extends EffectContext.Tag<any, any>>(
+  "provideOptional"<TTag extends EffectContext.Key<any, any>>(
     tag: TTag,
     provider: EffectOptionalProvider<
       TCurrentContext,
@@ -1105,7 +1105,7 @@ export interface EffectProcedureBuilderWithOutput<
   /**
    * Provides a request-scoped Effect service to downstream procedures.
    */
-  "provide"<TTag extends EffectContext.Tag<any, any>>(
+  "provide"<TTag extends EffectContext.Key<any, any>>(
     tag: TTag,
     provider: EffectProvider<
       TCurrentContext,
@@ -1129,7 +1129,7 @@ export interface EffectProcedureBuilderWithOutput<
   /**
    * Optionally provides a request-scoped Effect service to downstream procedures.
    */
-  "provideOptional"<TTag extends EffectContext.Tag<any, any>>(
+  "provideOptional"<TTag extends EffectContext.Key<any, any>>(
     tag: TTag,
     provider: EffectOptionalProvider<
       TCurrentContext,
@@ -1415,7 +1415,7 @@ export interface EffectProcedureBuilderWithInputOutput<
   /**
    * Provides a request-scoped Effect service to downstream procedures.
    */
-  "provide"<TTag extends EffectContext.Tag<any, any>>(
+  "provide"<TTag extends EffectContext.Key<any, any>>(
     tag: TTag,
     provider: EffectProvider<
       TCurrentContext,
@@ -1439,7 +1439,7 @@ export interface EffectProcedureBuilderWithInputOutput<
   /**
    * Optionally provides a request-scoped Effect service to downstream procedures.
    */
-  "provideOptional"<TTag extends EffectContext.Tag<any, any>>(
+  "provideOptional"<TTag extends EffectContext.Key<any, any>>(
     tag: TTag,
     provider: EffectOptionalProvider<
       TCurrentContext,

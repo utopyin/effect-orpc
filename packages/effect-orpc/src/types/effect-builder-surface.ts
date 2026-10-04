@@ -41,8 +41,8 @@ import type {
   MergedEffectErrorMap,
 } from "../tagged-error";
 
-type EffectTagIdentifier<T extends EffectContext.Tag<any, any>> =
-  T extends EffectContext.Tag<infer I, any> ? I : never;
+type EffectTagIdentifier<T extends EffectContext.Key<any, any>> =
+  T extends EffectContext.Key<infer I, any> ? I : never;
 
 export interface EffectBuilderSurface<
   TInitialContext extends Context,
@@ -314,7 +314,7 @@ export interface EffectBuilderSurface<
   /**
    * Provides a request-scoped Effect service to downstream procedures.
    */
-  provide<TTag extends EffectContext.Tag<any, any>>(
+  provide<TTag extends EffectContext.Key<any, any>>(
     tag: TTag,
     provider: EffectProvider<
       TCurrentContext,
@@ -337,7 +337,7 @@ export interface EffectBuilderSurface<
   /**
    * Optionally provides a request-scoped Effect service to downstream procedures.
    */
-  provideOptional<TTag extends EffectContext.Tag<any, any>>(
+  provideOptional<TTag extends EffectContext.Key<any, any>>(
     tag: TTag,
     provider: EffectOptionalProvider<
       TCurrentContext,

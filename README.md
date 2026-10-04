@@ -29,7 +29,7 @@ Runnable demos live in the repository's `examples/` directory.
 
 ```ts
 import { os } from "@orpc/server";
-import { Effect, ManagedRuntime } from "effect";
+import { Context, Effect, Layer, ManagedRuntime } from "effect";
 import { eos, makeEffectORPC, ORPCTaggedError } from "effect-orpc";
 
 interface User {
@@ -44,12 +44,14 @@ let users: User[] = [
 ];
 
 // Define your services
-class UsersRepo extends Effect.Service<UsersRepo>()("UsersRepo", {
-  accessors: true,
-  sync: () => ({
-    get: (id: number) => users.find((u) => u.id === id),
-  }),
-}) {}
+class UsersRepo extends Context.Service<
+  UsersRepo,
+  { get: (id: number) => User | undefined }
+>()("UsersRepo") {
+  static readonly layer = Layer.succeed(this, {
+    get: (id) => users.find((u) => u.id === id),
+  });
+}
 
 // Special yieldable oRPC error class
 class UserNotFoundError extends ORPCTaggedError("UserNotFoundError", {
@@ -59,7 +61,7 @@ class UserNotFoundError extends ORPCTaggedError("UserNotFoundError", {
 // Create an Effect-aware oRPC builder with your service layer, context, errors,
 // and middleware.
 const effectProcedure = eos
-  .provide(UsersRepo.Default)
+  .provide(UsersRepo.layer)
   .errors({ UNAUTHORIZED: { status: 401 }, UserNotFoundError })
   .$context<{ userId?: number }>()
   .use(({ context, errors, next }) => {
@@ -69,7 +71,7 @@ const effectProcedure = eos
 
 // Use ManagedRuntime only when scoped resources should be acquired once and
 // released on shutdown, for example a shared cache, database pool, or telemetry SDK:
-// const runtime = ManagedRuntime.make(UsersRepo.Default);
+// const runtime = ManagedRuntime.make(UsersRepo.layer);
 // const effectProcedure = makeEffectORPC(runtime).errors({ UserNotFoundError });
 
 // Create the router with mixed procedures
@@ -77,7 +79,8 @@ export const router = {
   health: os.handler(() => "ok"),
   users: {
     me: effectProcedure.effect(function* ({ context: { userId } }) {
-      const user = yield* UsersRepo.get(userId);
+      const usersRepo = yield* UsersRepo;
+      const user = usersRepo.get(userId);
       if (!user) {
         return yield* new UserNotFoundError();
       }
@@ -97,15 +100,15 @@ The wrapper enforces that Effect procedures only use services provided by `.prov
 import { Context, Effect, Layer } from "effect";
 import { eos } from "effect-orpc";
 
-class ProvidedService extends Context.Tag("ProvidedService")<
+class ProvidedService extends Context.Service<
   ProvidedService,
   { doSomething: () => Effect.Effect<string> }
->() {}
+>()("ProvidedService") {}
 
-class MissingService extends Context.Tag("MissingService")<
+class MissingService extends Context.Service<
   MissingService,
   { doSomething: () => Effect.Effect<string> }
->() {}
+>()("MissingService") {}
 
 const AppLive = Layer.succeed(ProvidedService, {
   doSomething: () => Effect.succeed("ok"),
@@ -155,7 +158,8 @@ const getUser = effectProcedure
     // ^^^ same code as the `UserNotFoundError` error key, defined at the class level
   })
   .effect(function* ({ input, errors }) {
-    const user = yield* UsersRepo.findById(input.id);
+    const usersRepo = yield* UsersRepo;
+    const user = usersRepo.findById(input.id);
     if (!user) {
       return yield* new UserNotFoundError();
       // or return `yield* Effect.fail(errors.USER_NOT_FOUND())`
@@ -367,7 +371,7 @@ eos
   });
 ```
 
-That split still creates multiple runtime boundaries. If the Node bridge is installed, however, `effect-orpc` carries the current `FiberRefs` through the native oRPC continuation and merges them into the next Effect boundary:
+That split still creates multiple runtime boundaries. If the Node bridge is installed, however, `effect-orpc` carries the current Effect service context through the native oRPC continuation and merges it into the next Effect boundary:
 
 ```ts
 import "effect-orpc/node";
@@ -386,14 +390,14 @@ eos
 
 If you want `.provide*` and Effect middleware to batch with the handler, use `.effect(function* ...)` instead of `.handler(...)`.
 
-## Request-Scoped Fiber Context
+## Request-Scoped Effect Context
 
 The `/node` entrypoint installs a bridge backed by `AsyncLocalStorage`. It has two uses:
 
-- `import "effect-orpc/node"` installs the bridge passively. This is enough for `effect-orpc` to propagate `FiberRefs` across its own split runtime boundaries.
+- `import "effect-orpc/node"` installs the bridge passively. This is enough for `effect-orpc` to propagate the current Effect service context across its own split runtime boundaries.
 - `withFiberContext(() => next())` actively seeds the bridge from an external Effect scope, such as framework middleware wrapping an oRPC handler.
 
-Use `withFiberContext` when request-local `FiberRef` state is created outside the oRPC pipeline and should be visible inside handlers:
+Use `withFiberContext` when request-local Effect context is created outside the oRPC pipeline and should be visible inside handlers:
 
 ```ts
 import { Hono } from "hono";
@@ -429,17 +433,19 @@ The main package stays runtime-agnostic; `/node` is separate because the bridge 
 Use `implementEffect(contract, layerOrRuntime)` when you already have an oRPC contract and want to keep contract-first enforcement while adding Effect-native handlers. Use `eos.provide(layer)` when you want to build procedures directly from the default Effect-aware builder.
 
 ```ts
-import { Effect } from "effect";
+import { Context, Layer } from "effect";
 import { eoc, implementEffect } from "effect-orpc";
 import z from "zod";
 
-class UsersRepo extends Effect.Service<UsersRepo>()("UsersRepo", {
-  accessors: true,
-  sync: () => ({
-    list: (amount: number) =>
+class UsersRepo extends Context.Service<
+  UsersRepo,
+  { list: (amount: number) => string[] }
+>()("UsersRepo") {
+  static readonly layer = Layer.succeed(this, {
+    list: (amount) =>
       Array.from({ length: amount }, (_, index) => `user-${index + 1}`),
-  }),
-}) {}
+  });
+}
 
 const contract = {
   users: {
@@ -449,12 +455,13 @@ const contract = {
   },
 };
 
-const oe = implementEffect(contract, UsersRepo.Default);
+const oe = implementEffect(contract, UsersRepo.layer);
 
 export const router = oe.router({
   users: {
     list: oe.users.list.effect(function* ({ input }) {
-      return yield* UsersRepo.list(input.amount);
+      const usersRepo = yield* UsersRepo;
+      return usersRepo.list(input.amount);
     }),
   },
 });
@@ -506,7 +513,8 @@ const oe = implementEffect(contract, AppLive);
 const router = oe.router({
   users: {
     list: oe.users.list.effect(function* ({ input }) {
-      return yield* UsersRepo.list(input.amount);
+      const usersRepo = yield* UsersRepo;
+      return usersRepo.list(input.amount);
     }),
   },
 });

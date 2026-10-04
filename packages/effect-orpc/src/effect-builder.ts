@@ -242,7 +242,7 @@ function createEffectBuilderProxy(
                     effectSteps: state.effectSteps,
                     runner: state.runner,
                     spanConfig: state.spanConfig,
-                  })(opts as any);
+                  })(opts);
                 },
               });
             };
@@ -370,7 +370,7 @@ function createEffectBuilderProxy(
         case "router":
           return getOrCreateVirtualMethod(context, prop, () => {
             return (router: Router<ContractRouter<any>, any>) =>
-              enhanceEffectRouter(router, effectDef) as any;
+              enhanceEffectRouter(router, effectDef);
           });
         case "lazy":
           return getOrCreateVirtualMethod(context, prop, () => {
@@ -378,7 +378,7 @@ function createEffectBuilderProxy(
               loader: () => Promise<{
                 default: Router<ContractRouter<any>, any>;
               }>,
-            ) => enhanceEffectRouter(lazy(loader), effectDef) as any;
+            ) => enhanceEffectRouter(lazy(loader), effectDef);
           });
         default:
           return unhandled();

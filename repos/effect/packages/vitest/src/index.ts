@@ -1,106 +1,96 @@
 /**
- * @since 1.0.0
+ * @since 4.0.0
  */
+import type * as Arbitrary from "effect/Arbitrary"
 import type * as Duration from "effect/Duration"
 import type * as Effect from "effect/Effect"
-import type * as FC from "effect/FastCheck"
 import type * as Layer from "effect/Layer"
 import type * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
-import type * as TestServices from "effect/TestServices"
-import * as V from "vitest"
-import * as internal from "./internal/internal.js"
+import type * as V from "vitest"
+import * as internal from "./internal/internal.ts"
 
 /**
- * @since 1.0.0
+ * Re-exports the `vitest` API unchanged.
+ *
+ * @stability unstable
+ * @since 4.0.0
  */
 export * from "vitest"
 
 /**
- * @since 1.0.0
+ * @stability unstable
+ * @since 4.0.0
  */
-export type API =
-  & { scopedFixtures: V.TestAPI<{}>["scoped"] }
-  & { [K in keyof V.TestAPI<{}>]: K extends "scoped" ? unknown : V.TestAPI<{}>[K] }
-  & TestCollectorCallable
-
-interface TestCollectorCallable<C = object> {
-  /**
-   * @deprecated Use options as the second argument instead
-   */
-  <ExtraContext extends C>(
-    name: string | Function,
-    fn: V.TestFunction<ExtraContext>,
-    options: TestCollectorOptions
-  ): void
-  <ExtraContext extends C>(
-    name: string | Function,
-    fn?: V.TestFunction<ExtraContext>,
-    options?: number | TestCollectorOptions
-  ): void
-  <ExtraContext extends C>(
-    name: string | Function,
-    options?: TestCollectorOptions,
-    fn?: V.TestFunction<ExtraContext>
-  ): void
-}
-
-type TestCollectorOptions = {
-  concurrent?: boolean
-  sequential?: boolean
-  only?: boolean
-  skip?: boolean
-  todo?: boolean
-  fails?: boolean
-  timeout?: number
-  retry?: number
-  repeats?: number
-}
+export type API = V.TestAPI<{}>
 
 /**
- * @since 1.0.0
+ * @since 4.0.0
  */
 export namespace Vitest {
   /**
-   * @since 1.0.0
+   * @since 4.0.0
    */
   export interface TestFunction<A, E, R, TestArgs extends Array<any>> {
     (...args: TestArgs): Effect.Effect<A, E, R>
   }
 
   /**
-   * @since 1.0.0
+   * @since 4.0.0
    */
-  export interface Test<R> {
+  export interface Test<R, ExtraContext = {}> {
     <A, E>(
       name: string,
-      self: TestFunction<A, E, R, [V.TestContext]>,
+      self: TestFunction<A, E, R, [V.TestContext & ExtraContext]>,
       timeout?: number | V.TestOptions
     ): void
   }
 
   /**
-   * @since 1.0.0
+   * @since 4.0.0
    */
   export type Arbitraries =
-    | Array<Schema.Schema.Any | FC.Arbitrary<any>>
-    | { [K in string]: Schema.Schema.Any | FC.Arbitrary<any> }
+    | Array<Schema.Schema<any> | Arbitrary.Arbitrary<any>>
+    | { [K in string]: Schema.Schema<any> | Arbitrary.Arbitrary<any> }
+
+  type ArbitraryValue<A> = A extends Schema.Schema<infer T> ? T
+    : A extends Arbitrary.Arbitrary<infer T> ? T
+    : never
 
   /**
-   * @since 1.0.0
+   * @since 4.0.0
    */
-  export interface Tester<R> extends Vitest.Test<R> {
-    skip: Vitest.Test<R>
-    skipIf: (condition: unknown) => Vitest.Test<R>
-    runIf: (condition: unknown) => Vitest.Test<R>
-    only: Vitest.Test<R>
+  export interface Tester<R, ExtraContext = {}> extends Vitest.Test<R, ExtraContext> {
+    skip: Vitest.Test<R, ExtraContext>
+    skipIf: (condition: unknown) => Vitest.Test<R, ExtraContext>
+    runIf: (condition: unknown) => Vitest.Test<R, ExtraContext>
+    only: Vitest.Test<R, ExtraContext>
     each: <T>(
       cases: ReadonlyArray<T>
-    ) => <A, E>(name: string, self: TestFunction<A, E, R, Array<T>>, timeout?: number | V.TestOptions) => void
-    fails: Vitest.Test<R>
+    ) => <A, E>(
+      name: string,
+      self: TestFunction<A, E, R, [T, V.TestContext & ExtraContext]>,
+      timeout?: number | V.TestOptions
+    ) => void
+    fails: Vitest.Test<R, ExtraContext>
 
     /**
-     * @since 1.0.0
+     * Runs an Effectful property test using Schema or Arbitrary inputs.
+     *
+     * **Details**
+     *
+     * Returning `false` or completing with any non-interruption failure falsifies the property and triggers shrinking.
+     * This includes typed Effect failures, thrown exceptions, and defects such as failed assertions. Effect
+     * interruption continues to interrupt the test.
+     *
+     * The Vitest timeout interrupts the Effect fiber running generation, property evaluation, and shrinking. Effect
+     * finalizers run during that interruption.
+     *
+     * **Gotchas**
+     *
+     * A timeout cannot preempt a synchronous JavaScript callback that does not return.
+     *
+     * @since 4.0.0
      */
     prop: <const Arbs extends Arbitraries, A, E>(
       name: string,
@@ -110,185 +100,225 @@ export namespace Vitest {
         E,
         R,
         [
-          { [K in keyof Arbs]: Arbs[K] extends FC.Arbitrary<infer T> ? T : Schema.Schema.Type<Arbs[K]> },
+          {
+            [K in keyof Arbs]: ArbitraryValue<Arbs[K]>
+          },
           V.TestContext
         ]
       >,
       timeout?:
         | number
         | V.TestOptions & {
-          fastCheck?: FC.Parameters<
-            { [K in keyof Arbs]: Arbs[K] extends FC.Arbitrary<infer T> ? T : Schema.Schema.Type<Arbs[K]> }
-          >
+          arbitrary?: Arbitrary.CheckOptions
         }
     ) => void
   }
 
   /**
-   * @since 1.0.0
+   * @since 4.0.0
    */
-  export interface MethodsNonLive<R = never, ExcludeTestServices extends boolean = false> extends API {
-    readonly effect: Vitest.Tester<(ExcludeTestServices extends true ? never : TestServices.TestServices) | R>
+  export interface MethodsNonLive<R = never, ExtraContext = {}> extends V.TestAPI<ExtraContext> {
+    readonly effect: Vitest.Tester<R | Scope.Scope, ExtraContext>
     readonly flakyTest: <A, E, R2>(
-      self: Effect.Effect<A, E, R2>,
-      timeout?: Duration.DurationInput
+      self: Effect.Effect<A, E, R2 | Scope.Scope>,
+      timeout?: Duration.Input
     ) => Effect.Effect<A, never, R2>
-    readonly scoped: Vitest.Tester<
-      (ExcludeTestServices extends true ? never : TestServices.TestServices) | Scope.Scope | R
-    >
     readonly layer: <R2, E>(layer: Layer.Layer<R2, E, R>, options?: {
-      readonly timeout?: Duration.DurationInput
+      readonly concurrent?: boolean
+      readonly timeout?: Duration.Input
     }) => {
-      (f: (it: Vitest.MethodsNonLive<R | R2, ExcludeTestServices>) => void): void
+      (f: (it: Vitest.MethodsNonLive<R | R2, ExtraContext>) => void): void
       (
         name: string,
-        f: (it: Vitest.MethodsNonLive<R | R2, ExcludeTestServices>) => void
+        f: (it: Vitest.MethodsNonLive<R | R2, ExtraContext>) => void
       ): void
     }
 
     /**
-     * @since 1.0.0
+     * Runs a synchronous property test using Schema or Arbitrary inputs.
+     *
+     * **Details**
+     *
+     * Returning `false` or throwing falsifies the property and triggers shrinking. A callback that returns normally
+     * without returning `false` passes for that generated input.
+     *
+     * The Vitest timeout interrupts the Effect fiber running generation and shrinking.
+     *
+     * **Gotchas**
+     *
+     * A timeout cannot preempt a synchronous JavaScript callback that does not return.
+     *
+     * @since 4.0.0
      */
     readonly prop: <const Arbs extends Arbitraries>(
       name: string,
       arbitraries: Arbs,
       self: (
-        properties: { [K in keyof Arbs]: Arbs[K] extends FC.Arbitrary<infer T> ? T : Schema.Schema.Type<Arbs[K]> },
+        properties: {
+          [K in keyof Arbs]: ArbitraryValue<Arbs[K]>
+        },
         ctx: V.TestContext
       ) => void,
       timeout?:
         | number
         | V.TestOptions & {
-          fastCheck?: FC.Parameters<
-            { [K in keyof Arbs]: Arbs[K] extends FC.Arbitrary<infer T> ? T : Schema.Schema.Type<Arbs[K]> }
-          >
+          arbitrary?: Arbitrary.CheckOptions
         }
     ) => void
   }
 
   /**
-   * @since 1.0.0
+   * @since 4.0.0
    */
-  export interface Methods<R = never> extends MethodsNonLive<R> {
-    readonly live: Vitest.Tester<R>
-    readonly scopedLive: Vitest.Tester<Scope.Scope | R>
+  export interface Methods<R = never, ExtraContext = {}> extends MethodsNonLive<R, ExtraContext> {
+    readonly live: Vitest.Tester<Scope.Scope | R, ExtraContext>
+    readonly layer: <R2, E>(layer: Layer.Layer<R2, E, R>, options?: {
+      readonly concurrent?: boolean
+      readonly memoMap?: Layer.MemoMap
+      readonly timeout?: Duration.Input
+      readonly excludeTestServices?: boolean
+    }) => {
+      (f: (it: Vitest.MethodsNonLive<R | R2, ExtraContext>) => void): void
+      (
+        name: string,
+        f: (it: Vitest.MethodsNonLive<R | R2, ExtraContext>) => void
+      ): void
+    }
   }
 }
 
 /**
- * @since 1.0.0
+ * @since 4.0.0
  */
 export const addEqualityTesters: () => void = internal.addEqualityTesters
 
 /**
- * @since 1.0.0
+ * @since 4.0.0
  */
-export const effect: Vitest.Tester<TestServices.TestServices> = internal.effect
+export const effect: Vitest.Tester<Scope.Scope> = internal.effect
 
 /**
- * @since 1.0.0
+ * @since 4.0.0
  */
-export const scoped: Vitest.Tester<TestServices.TestServices | Scope.Scope> = internal.scoped
-
-/**
- * @since 1.0.0
- */
-export const live: Vitest.Tester<never> = internal.live
-
-/**
- * @since 1.0.0
- */
-export const scopedLive: Vitest.Tester<Scope.Scope> = internal.scopedLive
+export const live: Vitest.Tester<Scope.Scope> = internal.live
 
 /**
  * Share a `Layer` between multiple tests, optionally wrapping
  * the tests in a `describe` block if a name is provided.
  *
- * @since 1.0.0
+ * Named layers accept `concurrent` to override inherited suite concurrency.
+ * Anonymous layers always inherit the enclosing suite's concurrency.
+ * Use `ctx.expect` in concurrent tests for test-local snapshots and assertion counts.
+ *
+ * @since 4.0.0
  *
  * ```ts
- * import { expect, layer } from "@effect/vitest"
- * import { Context, Effect, Layer } from "effect"
+ * import { assert, layer } from "@effect/vitest"
+ * import { Effect, Layer, Context } from "effect"
  *
- * class Foo extends Context.Tag("Foo")<Foo, "foo">() {
- *   static Live = Layer.succeed(Foo, "foo")
+ * class Foo extends Context.Service<Foo, "foo">()("Foo") {
+ *   static layer = Layer.succeed(Foo, "foo")
  * }
  *
- * class Bar extends Context.Tag("Bar")<Bar, "bar">() {
- *   static Live = Layer.effect(
+ * class Bar extends Context.Service<Bar, "bar">()("Bar") {
+ *   static layer = Layer.effect(
  *     Bar,
  *     Effect.map(Foo, () => "bar" as const)
  *   )
  * }
  *
- * layer(Foo.Live)("layer", (it) => {
+ * layer(Foo.layer)("layer", (it) => {
  *   it.effect("adds context", () =>
- *     Effect.gen(function* () {
+ *     Effect.gen(function*() {
  *       const foo = yield* Foo
- *       expect(foo).toEqual("foo")
- *     })
- *   )
+ *       assert.strictEqual(foo, "foo")
+ *     }))
  *
- *   it.layer(Bar.Live)("nested", (it) => {
+ *   it.layer(Bar.layer)("nested", (it) => {
  *     it.effect("adds context", () =>
- *       Effect.gen(function* () {
+ *       Effect.gen(function*() {
  *         const foo = yield* Foo
  *         const bar = yield* Bar
- *         expect(foo).toEqual("foo")
- *         expect(bar).toEqual("bar")
- *       })
- *     )
+ *         assert.strictEqual(foo, "foo")
+ *         assert.strictEqual(bar, "bar")
+ *       }))
  *   })
  * })
  * ```
  */
-export const layer: <R, E, const ExcludeTestServices extends boolean = false>(
+export const layer: <R, E>(
   layer_: Layer.Layer<R, E>,
   options?: {
+    readonly concurrent?: boolean
     readonly memoMap?: Layer.MemoMap
-    readonly timeout?: Duration.DurationInput
-    readonly excludeTestServices?: ExcludeTestServices
+    readonly timeout?: Duration.Input
+    readonly excludeTestServices?: boolean
   }
 ) => {
-  (f: (it: Vitest.MethodsNonLive<R, ExcludeTestServices>) => void): void
-  (name: string, f: (it: Vitest.MethodsNonLive<R, ExcludeTestServices>) => void): void
+  (f: (it: Vitest.MethodsNonLive<R>) => void): void
+  (name: string, f: (it: Vitest.MethodsNonLive<R>) => void): void
 } = internal.layer
 
 /**
- * @since 1.0.0
+ * @since 4.0.0
  */
 export const flakyTest: <A, E, R>(
-  self: Effect.Effect<A, E, R>,
-  timeout?: Duration.DurationInput
+  self: Effect.Effect<A, E, R | Scope.Scope>,
+  timeout?: Duration.Input
 ) => Effect.Effect<A, never, R> = internal.flakyTest
 
 /**
- * @since 1.0.0
+ * @since 4.0.0
  */
 export const prop: Vitest.Methods["prop"] = internal.prop
 
 /**
- * @since 1.0.0
+ * @since 4.0.0
  */
 
-/** @ignored */
-const methods = { effect, live, flakyTest, scoped, scopedLive, layer, prop } as const
-
 /**
- * @since 1.0.0
+ * @since 4.0.0
  */
-export const it: Vitest.Methods = Object.assign(V.it, {
-  ...methods,
-  scopedFixtures: V.it.scoped.bind(V.it)
-})
+export const it: Vitest.Methods = internal.it
 
 /**
- * @since 1.0.0
+ * Creates the Effect test helpers for a Vitest test API, such as one extended with fixtures.
+ *
+ * **Details**
+ *
+ * Tests receive the fixtures they destructure from their context. Vitest sets them up before the test and tears
+ * them down after the test's scope closes, as it does for its own tests. `it.effect.each` passes the context
+ * after the test case, and named and anonymous `it.layer` blocks keep the fixtures.
+ *
+ * **Gotchas**
+ *
+ * Vitest reads the destructured names to decide which fixtures to set up. Once any fixture is defined, a test that
+ * takes the whole context as a plain parameter, such as `(ctx) =>`, fails with a `FixtureParseError`. Property
+ * tests receive only the base test context and cannot request fixtures; auto fixtures still run.
+ *
+ * **Example** (Using a Vitest fixture in an Effect test)
+ *
+ * ```ts
+ * import { assert, makeMethods, test } from "@effect/vitest"
+ * import { Effect } from "effect"
+ *
+ * const it = makeMethods(
+ *   test.extend("config", { scope: "file" }, () => ({ port: 3000 }))
+ * )
+ *
+ * it.effect("reads the config fixture", ({ config }) =>
+ *   Effect.sync(() => {
+ *     assert.strictEqual(config.port, 3000)
+ *   }))
+ * ```
+ *
+ * @since 4.0.0
  */
-export const makeMethods: (it: API) => Vitest.Methods = internal.makeMethods
+export const makeMethods: <ExtraContext>(it: V.TestAPI<ExtraContext>) => Vitest.Methods<never, ExtraContext> =
+  internal.makeMethods
 
 /**
- * @since 1.0.0
+ * @since 4.0.0
  */
 export const describeWrapped: (name: string, f: (it: Vitest.Methods) => void) => V.SuiteCollector =
   internal.describeWrapped

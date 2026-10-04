@@ -8,9 +8,9 @@ async function makeSplitProcedure(options: {
   if (options.installNodeBridge) {
     await import("../node");
   } else {
-    const { installFiberContextBridge } =
-      await import("../fiber-context-bridge");
-    installFiberContextBridge(undefined);
+    const { installServiceContextBridge } =
+      await import("../service-context-bridge");
+    installServiceContextBridge(undefined);
   }
 
   const [
@@ -23,10 +23,10 @@ async function makeSplitProcedure(options: {
     import("../effect-builder"),
   ]);
 
-  class CurrentUser extends Context.Tag("SideEffectImportCurrentUser")<
+  class CurrentUser extends Context.Service<
     CurrentUser,
     { readonly id: string }
-  >() {}
+  >()("SideEffectImportCurrentUser") {}
 
   const runtime = ManagedRuntime.make(Layer.empty);
   const runPromiseExit = vi.spyOn(runtime, "runPromiseExit");
@@ -50,7 +50,7 @@ async function makeSplitProcedure(options: {
 }
 
 describe("node side-effect bridge", () => {
-  it("propagates FiberRefs across split Effect groups with only the side-effect import", async () => {
+  it("propagates services across split Effect groups with only the side-effect import", async () => {
     const { call, procedure, runPromiseExit, runtime } =
       await makeSplitProcedure({ installNodeBridge: true });
 
@@ -58,13 +58,13 @@ describe("node side-effect bridge", () => {
       await expect(
         call(procedure, undefined, { context: { user: { id: "u-side" } } }),
       ).resolves.toBe("u-side:u-side");
-      expect(runPromiseExit).toHaveBeenCalledTimes(2);
+      expect(runPromiseExit).toHaveBeenCalledTimes(1);
     } finally {
       await runtime.dispose();
     }
   });
 
-  it("does not propagate FiberRefs across split Effect groups without the bridge", async () => {
+  it("does not propagate services across split Effect groups without the bridge", async () => {
     const { call, procedure, runPromiseExit, runtime } =
       await makeSplitProcedure({ installNodeBridge: false });
 

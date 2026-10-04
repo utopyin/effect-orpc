@@ -1,39 +1,34 @@
-import { afterAll, describe, expect, it, layer } from "@effect/vitest"
-import { Context, Duration, Effect, FastCheck, Fiber, Layer, Schema, TestClock, TestConfig } from "effect"
+import { afterAll, assert, describe, describeWrapped, expect, it, layer } from "@effect/vitest"
+import * as testAssert from "@effect/vitest/utils"
+import { Clock, Context, Duration, Effect, Fiber, Layer, Schema } from "effect"
+import * as Arbitrary from "effect/Arbitrary"
+import { TestClock } from "effect/testing"
 
-it.live(
-  "live %s",
-  () => Effect.sync(() => expect(1).toEqual(1))
-)
 it.effect(
   "effect",
-  () => Effect.sync(() => expect(1).toEqual(1))
-)
-it.scoped(
-  "scoped",
   () => Effect.acquireRelease(Effect.sync(() => expect(1).toEqual(1)), () => Effect.void)
 )
-it.scopedLive(
-  "scopedLive",
+it.live(
+  "live",
   () => Effect.acquireRelease(Effect.sync(() => expect(1).toEqual(1)), () => Effect.void)
 )
+
+it("throws fails when the thunk does not throw", () => {
+  expect(() => testAssert.throws(() => {})).toThrow()
+})
+
+it("throwsAsync fails when the promise resolves", async () => {
+  await expect(testAssert.throwsAsync(() => Promise.resolve())).rejects.toThrow()
+})
 
 // each
 
-it.live.each([1, 2, 3])(
-  "live each %s",
-  (n) => Effect.sync(() => expect(n).toEqual(n))
-)
 it.effect.each([1, 2, 3])(
   "effect each %s",
-  (n) => Effect.sync(() => expect(n).toEqual(n))
-)
-it.scoped.each([1, 2, 3])(
-  "scoped each %s",
   (n) => Effect.acquireRelease(Effect.sync(() => expect(n).toEqual(n)), () => Effect.void)
 )
-it.scopedLive.each([1, 2, 3])(
-  "scopedLive each %s",
+it.live.each([1, 2, 3])(
+  "live each %s",
   (n) => Effect.acquireRelease(Effect.sync(() => expect(n).toEqual(n)), () => Effect.void)
 )
 
@@ -47,14 +42,6 @@ it.effect.skip(
   "effect skipped",
   () => Effect.die("skipped anyway")
 )
-it.scoped.skip(
-  "scoped skipped",
-  () => Effect.acquireRelease(Effect.die("skipped anyway"), () => Effect.void)
-)
-it.scopedLive.skip(
-  "scopedLive skipped",
-  () => Effect.acquireRelease(Effect.die("skipped anyway"), () => Effect.void)
-)
 
 // skipIf
 
@@ -66,15 +53,26 @@ it.effect.skipIf(false)("effect skipIf (false)", () => Effect.sync(() => expect(
 it.effect.runIf(true)("effect runIf (true)", () => Effect.sync(() => expect(1).toEqual(1)))
 it.effect.runIf(false)("effect runIf (false)", () => Effect.die("not run anyway"))
 
+// chained helpers
+
+it.describe.each(["foo", "bar"] as const)("describe.each %s", (text) => {
+  it.effect("runs an Effect test", () =>
+    Effect.sync(() => {
+      assert.include(["foo", "bar"], text)
+    }))
+})
+
+it.skip.each([1])("skip.each %s", () => assert.fail("skipped anyway"))
+
 // The following test is expected to fail because it simulates a test timeout.
 // Be aware that eventual "failure" of the test is only logged out.
-it.scopedLive.fails("interrupts on timeout", (ctx) =>
+it.live.fails("interrupts on timeout", (ctx) =>
   Effect.gen(function*() {
     let acquired = false
 
     ctx.onTestFailed(() => {
       if (acquired) {
-        // eslint-disable-next-line no-console
+        // oxlint-disable-next-line no-console
         console.error("'effect is interrupted on timeout' @effect/vitest test failed")
       }
     })
@@ -86,33 +84,37 @@ it.scopedLive.fails("interrupts on timeout", (ctx) =>
     yield* Effect.sleep(1000)
   }), 1)
 
-class Foo extends Context.Tag("Foo")<Foo, "foo">() {
-  static Live = Layer.succeed(Foo, "foo")
+class Foo extends Context.Service<Foo, "foo">()("Foo") {
+  static layer = Layer.succeed(Foo)("foo")
 }
 
-class Bar extends Context.Tag("Bar")<Bar, "bar">() {
-  static Live = Layer.effect(Bar, Effect.map(Foo, () => "bar" as const))
+class Bar extends Context.Service<Bar, "bar">()("Bar") {
+  static layer = Layer.effect(Bar)(Effect.map(Foo, () => "bar" as const))
 }
 
-class Sleeper extends Effect.Service<Sleeper>()("Sleeper", {
-  effect: Effect.gen(function*() {
-    const clock = yield* Effect.clock
+class Sleeper extends Context.Service<Sleeper, {
+  readonly sleep: (ms: number) => Effect.Effect<void>
+}>()("Sleeper") {
+  static readonly layer = Layer.effect(Sleeper)(
+    Effect.gen(function*() {
+      const clock = yield* Clock.Clock
 
-    return {
-      sleep: (ms: number) => clock.sleep(Duration.millis(ms))
-    } as const
-  })
-}) {}
+      return {
+        sleep: (ms: number) => clock.sleep(Duration.millis(ms))
+      }
+    })
+  )
+}
 
 describe("layer", () => {
-  layer(Foo.Live)((it) => {
+  layer(Foo.layer)((it) => {
     it.effect("adds context", () =>
       Effect.gen(function*() {
         const foo = yield* Foo
         expect(foo).toEqual("foo")
       }))
 
-    it.layer(Bar.Live)("nested", (it) => {
+    it.layer(Bar.layer)("nested", (it) => {
       it.effect("adds context", () =>
         Effect.gen(function*() {
           const foo = yield* Foo
@@ -122,7 +124,7 @@ describe("layer", () => {
         }))
     })
 
-    it.layer(Bar.Live)((it) => {
+    it.layer(Bar.layer)((it) => {
       it.effect("without name", () =>
         Effect.gen(function*() {
           const foo = yield* Foo
@@ -138,9 +140,8 @@ describe("layer", () => {
         expect(released).toEqual(true)
       })
 
-      class Scoped extends Context.Tag("Scoped")<Scoped, "scoped">() {
-        static Live = Layer.scoped(
-          Scoped,
+      class Scoped extends Context.Service<Scoped, "scoped">()("Scoped") {
+        static layer = Layer.effect(Scoped)(
           Effect.acquireRelease(
             Effect.succeed("scoped" as const),
             () => Effect.sync(() => released = true)
@@ -148,7 +149,7 @@ describe("layer", () => {
         )
       }
 
-      it.layer(Scoped.Live)((it) => {
+      it.layer(Scoped.layer)((it) => {
         it.effect("adds context", () =>
           Effect.gen(function*() {
             const foo = yield* Foo
@@ -167,24 +168,47 @@ describe("layer", () => {
             expect(foo).toEqual("foo")
             return num === num
           }),
-        { fastCheck: { numRuns: 200 } }
+        { arbitrary: { runs: 200 } }
+      )
+
+      it.effect.prop(
+        "adds context with a Schema property",
+        [Schema.Int],
+        ([value]) =>
+          Effect.gen(function*() {
+            const foo = yield* Foo
+            assert.strictEqual(foo, "foo")
+            assert.isTrue(Number.isInteger(value))
+          }),
+        { arbitrary: { runs: 5, seed: "vitest-arbitrary-layer" } }
       )
     })
   })
 
-  layer(Sleeper.Default)("test services", (it) => {
+  describe("anonymous layer next to a Vitest fixture", () => {
+    const withValue = it.extend("value", () => 1)
+
+    layer(Foo.layer)((it) => {
+      it.effect("provides its context", () => Effect.map(Foo, (foo) => expect(foo).toEqual("foo")))
+    })
+
+    withValue("runs the fixture test", ({ value }) => {
+      expect(value).toEqual(1)
+    })
+  })
+
+  layer(Sleeper.layer)("test services", (it) => {
     it.effect("TestClock", () =>
       Effect.gen(function*() {
-        yield* TestConfig.TestConfig
         const sleeper = yield* Sleeper
-        const fiber = yield* Effect.fork(sleeper.sleep(100_000))
-        yield* Effect.yieldNow()
+        const fiber = yield* Effect.forkChild(sleeper.sleep(100_000))
+        yield* Effect.yieldNow
         yield* TestClock.adjust(100_000)
         yield* Fiber.join(fiber)
       }))
   })
 
-  layer(Foo.Live)("with a name", (it) => {
+  layer(Foo.layer)("with a name", (it) => {
     describe("with a nested describe", () => {
       it.effect("adds context", () =>
         Effect.gen(function*() {
@@ -199,7 +223,7 @@ describe("layer", () => {
       }))
   })
 
-  layer(Sleeper.Default, { excludeTestServices: true })("live services", (it) => {
+  layer(Sleeper.layer, { excludeTestServices: true })("live services", (it) => {
     it.effect("Clock", () =>
       Effect.gen(function*() {
         const sleeper = yield* Sleeper
@@ -208,38 +232,176 @@ describe("layer", () => {
   })
 })
 
+describeWrapped("describeWrapped", (it) => {
+  it.layer(Foo.layer)("named layer", (it) => {
+    it.effect("registers in its own suite", ({ task }) =>
+      Effect.gen(function*() {
+        assert.strictEqual(task.suite?.name, "named layer")
+        assert.isTrue(task.suite?.tasks.includes(task))
+        assert.strictEqual(yield* Foo, "foo")
+      }))
+  })
+})
+
 // property testing
 
-const realNumber = Schema.Finite.pipe(Schema.nonNaN())
+const realNumber = Schema.Finite
+const textArbitrary = Arbitrary.schema(Schema.Literals(["a", "b"]))
 
-it.prop("symmetry", [realNumber, FastCheck.integer()], ([a, b]) => a + b === b + a)
+it.prop(
+  "schema with array",
+  [Schema.String, Schema.Int],
+  ([text, count]) => typeof text === "string" && Number.isInteger(count)
+)
+
+it.prop(
+  "schema with object",
+  { text: Schema.String, count: Schema.Int },
+  ({ text, count }) => typeof text === "string" && Number.isInteger(count)
+)
+
+let mixedTupleRuns = 0
+let mixedRecordRuns = 0
+afterAll(() => {
+  assert.strictEqual(mixedTupleRuns, 5)
+  assert.strictEqual(mixedRecordRuns, 5)
+})
+
+it.prop(
+  "Schema and Arbitrary with array",
+  [Schema.Int, textArbitrary],
+  ([count, text]) => {
+    mixedTupleRuns++
+    assert.isTrue(Number.isInteger(count))
+    assert.include(["a", "b"], text)
+  },
+  { arbitrary: { runs: 5, maxDiscards: 0, seed: "vitest-mixed-tuple" } }
+)
+
+it.effect.prop(
+  "Schema and Arbitrary with object",
+  { count: Schema.Int, text: textArbitrary },
+  ({ count, text }) =>
+    Effect.sync(() => {
+      mixedRecordRuns++
+      assert.isTrue(Number.isInteger(count))
+      assert.include(["a", "b"], text)
+    }),
+  { arbitrary: { runs: 5, maxDiscards: 0, seed: "vitest-mixed-record" } }
+)
+
+it.prop("symmetry", [realNumber, Schema.Int], ([a, b]) => a + b === b + a)
 
 it.prop(
   "symmetry with object",
-  { a: realNumber, b: FastCheck.integer() },
+  { a: realNumber, b: Schema.Int },
   ({ a, b }) => a + b === b + a
 )
 
-it.effect.prop("symmetry", [realNumber, FastCheck.integer()], ([a, b]) =>
+it.live.prop(
+  "schema with object",
+  { value: Schema.Int },
+  ({ value }) => Effect.sync(() => assert.isTrue(Number.isInteger(value)))
+)
+
+let arbitraryEffectRuns = 0
+afterAll(() => assert.strictEqual(arbitraryEffectRuns, 5))
+
+it.effect.prop(
+  "schema with Arbitrary options",
+  [Schema.String, Schema.Int],
+  ([text, count]) =>
+    Effect.sync(() => {
+      arbitraryEffectRuns++
+      assert.strictEqual(typeof text, "string")
+      assert.isTrue(Number.isInteger(count))
+    }),
+  { arbitrary: { runs: 5, maxDiscards: 0, seed: "vitest-arbitrary" } }
+)
+
+it.effect.prop("symmetry", [realNumber, Schema.Int], ([a, b]) =>
   Effect.gen(function*() {
     yield* Effect.void
-
-    return a + b === b + a
+    assert.isTrue(a + b === b + a)
   }))
 
-it.effect.prop("symmetry with object", { a: realNumber, b: FastCheck.integer() }, ({ a, b }) =>
+it.effect.prop("symmetry with object", { a: realNumber, b: Schema.Int }, ({ a, b }) =>
   Effect.gen(function*() {
     yield* Effect.void
-
-    return a + b === b + a
+    assert.strictEqual(a + b, b + a)
   }))
 
-it.scoped.prop(
+it.effect.prop(
   "should detect the substring",
-  { a: Schema.String, b: Schema.String, c: FastCheck.string() },
+  { a: Schema.String, b: Schema.String, c: Schema.String },
   ({ a, b, c }) =>
     Effect.gen(function*() {
       yield* Effect.scope
-      return (a + b + c).includes(b)
+      assert.include(a + b + c, b)
     })
 )
+
+describe("property failures", () => {
+  const Input = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 1_000 }))
+  const pureDefectValues: Array<number> = []
+  const effectDefectValues: Array<number> = []
+  let interruptedRuns = 0
+  let timeoutPropertyStarted = false
+  let timeoutPropertyReleased = false
+
+  afterAll(() => {
+    assert.deepStrictEqual(pureDefectValues, [8, 1])
+    assert.deepStrictEqual(effectDefectValues, [8, 1])
+    assert.strictEqual(interruptedRuns, 1)
+    assert.isTrue(timeoutPropertyStarted)
+    assert.isTrue(timeoutPropertyReleased)
+  })
+
+  it.prop(
+    "shrinks synchronous defects",
+    [Input],
+    ([value]) => {
+      pureDefectValues.push(value)
+      throw new Error("property defect")
+    },
+    { fails: true, arbitrary: { runs: 1, seed: "assertion-shrink" } }
+  )
+
+  it.effect.prop(
+    "shrinks Effect defects",
+    [Input],
+    ([value]) =>
+      Effect.sync(() => {
+        effectDefectValues.push(value)
+        assert.strictEqual(value, 0)
+      }),
+    { fails: true, arbitrary: { runs: 1, seed: "assertion-shrink" } }
+  )
+
+  it.effect.prop(
+    "preserves interruption",
+    [Input],
+    () => {
+      interruptedRuns++
+      return Effect.interrupt
+    },
+    { fails: true, arbitrary: { runs: 1, seed: "assertion-shrink" } }
+  )
+
+  it.effect.prop(
+    "interrupts property checking on timeout",
+    [Schema.Literal("value")],
+    () =>
+      Effect.acquireUseRelease(
+        Effect.sync(() => {
+          timeoutPropertyStarted = true
+        }),
+        () => Effect.never,
+        () =>
+          Effect.sync(() => {
+            timeoutPropertyReleased = true
+          })
+      ),
+    { fails: true, timeout: 10, arbitrary: { runs: 1, maxDiscards: 0, seed: "property-timeout" } }
+  )
+})

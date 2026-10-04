@@ -1,1101 +1,677 @@
 /**
- * @since 3.10.0
- */
-
-import * as Arr from "./Array.js"
-import * as FastCheck from "./FastCheck.js"
-import { globalValue } from "./GlobalValue.js"
-import * as errors_ from "./internal/schema/errors.js"
-import * as schemaId_ from "./internal/schema/schemaId.js"
-import * as util_ from "./internal/schema/util.js"
-import * as Option from "./Option.js"
-import * as Predicate from "./Predicate.js"
-import type * as Schema from "./Schema.js"
-import * as SchemaAST from "./SchemaAST.js"
-import type * as Types from "./Types.js"
-
-/**
- * @category model
- * @since 3.10.0
- */
-export interface LazyArbitrary<A> {
-  (fc: typeof FastCheck): FastCheck.Arbitrary<A>
-}
-
-/**
- * @category annotations
- * @since 3.10.0
- */
-export interface ArbitraryGenerationContext {
-  readonly maxDepth: number
-  readonly depthIdentifier?: string
-  readonly constraints?: StringConstraints | NumberConstraints | BigIntConstraints | DateConstraints | ArrayConstraints
-}
-
-/**
- * @category annotations
- * @since 3.10.0
- */
-export type ArbitraryAnnotation<A, TypeParameters extends ReadonlyArray<any> = readonly []> = (
-  ...arbitraries: [
-    ...{ readonly [K in keyof TypeParameters]: LazyArbitrary<TypeParameters[K]> },
-    ctx: ArbitraryGenerationContext
-  ]
-) => LazyArbitrary<A>
-
-/**
- * Returns a LazyArbitrary for the `A` type of the provided schema.
+ * Derives, samples, and checks generated values from Effect Schema.
  *
- * @category arbitrary
- * @since 3.10.0
+ * @stability unstable
+ * @since 4.0.0
  */
-export const makeLazy = <A, I, R>(schema: Schema.Schema<A, I, R>): LazyArbitrary<A> => {
-  const description = getDescription(schema.ast, [])
-  return go(description, { maxDepth: 2 })
+import * as Cause from "./Cause.ts"
+import type * as Effect from "./Effect.ts"
+import type * as Filter from "./Filter.ts"
+import * as Formatter from "./Formatter.ts"
+import { dual } from "./Function.ts"
+import type * as Model from "./internal/arbitrary/model.ts"
+import * as Internal from "./internal/arbitrary/runner.ts"
+import type { Pipeable } from "./Pipeable.ts"
+import { hasProperty, type Predicate, type Refinement } from "./Predicate.ts"
+import type * as Schema_ from "./Schema.ts"
+import type * as Types from "./Types.ts"
+
+/**
+ * Runtime type identifier for `Arbitrary` values.
+ *
+ * @stability unstable
+ * @category type IDs
+ * @since 4.0.0
+ */
+export const TypeId: TypeId = Internal.TypeId
+
+/**
+ * Type of the runtime identifier for `Arbitrary` values.
+ *
+ * @stability unstable
+ * @category type IDs
+ * @since 4.0.0
+ */
+export type TypeId = "~effect/arbitrary/Arbitrary"
+
+/**
+ * Represents a pure description of values that can be generated and shrunk.
+ *
+ * **When to use**
+ *
+ * Use as the result of {@link schema}, {@link Constant}, and composition, and as the input to {@link sampleEffect} or
+ * {@link checkEffect}.
+ *
+ * **Details**
+ *
+ * Arbitraries implement `Pipeable`, so data-last combinators can be composed with `.pipe(...)`.
+ *
+ * @stability unstable
+ * @category models
+ * @since 4.0.0
+ */
+export interface Arbitrary<out A> extends Pipeable {
+  readonly [TypeId]: TypeId
+  readonly "~A": Types.Covariant<A>
+  /**
+   * @internal
+   */
+  readonly gen: Model.Generator<A>
 }
 
 /**
- * Returns a fast-check Arbitrary for the `A` type of the provided schema.
+ * Configures Schema-derived generation.
  *
- * @category arbitrary
- * @since 3.10.0
+ * **Details**
+ *
+ * `shrink` returns the immediate semantic simplifications of a failing value. Each returned candidate is validated
+ * against the decoded side of the original Schema before it can reach the property.
+ *
+ * @stability unstable
+ * @category models
+ * @since 4.0.0
  */
-export const make = <A, I, R>(schema: Schema.Schema<A, I, R>): FastCheck.Arbitrary<A> => makeLazy(schema)(FastCheck)
-
-interface StringConstraints {
-  readonly _tag: "StringConstraints"
-  readonly constraints: FastCheck.StringSharedConstraints
-  readonly pattern?: string
+export interface SchemaOptions<A> {
+  readonly shrink?: ((value: A) => ReadonlyArray<A>) | undefined
 }
 
-/** @internal */
-export const makeStringConstraints = (options: {
+/**
+ * Configures the lengths generated and preserved during shrinking by {@link array}.
+ *
+ * **Details**
+ *
+ * `minLength` defaults to zero. Generation grows with `size`, honors `minLength` even at size zero, and is capped by
+ * `maxLength` when provided. Both bounds must be integers between zero and 4294967295, with `minLength <= maxLength`.
+ *
+ * @stability unstable
+ * @category models
+ * @since 4.0.0
+ */
+export interface ArrayOptions {
   readonly minLength?: number | undefined
   readonly maxLength?: number | undefined
-  readonly pattern?: string | undefined
-}): StringConstraints => {
-  const out: Types.Mutable<StringConstraints> = {
-    _tag: "StringConstraints",
-    constraints: {}
+}
+
+/**
+ * Checks whether a value is an `Arbitrary`.
+ *
+ * **When to use**
+ *
+ * Use when accepting both Arbitrary values and other input descriptions.
+ *
+ * @stability unstable
+ * @category guards
+ * @since 4.0.0
+ */
+export const isArbitrary = (u: unknown): u is Arbitrary<unknown> => hasProperty(u, TypeId)
+
+/**
+ * Configures direct sampling from an `Arbitrary`.
+ *
+ * **Details**
+ *
+ * `size` is a local complexity scale, not a global bound on the complete value. Each unconstrained string, collection,
+ * or object property observes the same size independently, while recursive branches share one recursion allowance.
+ * Explicit Schema minima and required members are still honored, while explicit maxima clamp generation.
+ *
+ * @stability unstable
+ * @category models
+ * @since 4.0.0
+ */
+export interface SampleOptions {
+  readonly count?: number | undefined
+  readonly size?: number | undefined
+  readonly maxDiscards?: number | undefined
+  readonly seed?: string | number | undefined
+}
+
+/**
+ * Describes sampling exhaustion before the requested number of values was generated.
+ *
+ * **Details**
+ *
+ * The effective `seed` can be passed to {@link sampleEffect} to reproduce the exhausted run, including when sampling
+ * originally selected a seed from the Effect `Random` service.
+ *
+ * @stability unstable
+ * @category errors
+ * @since 4.0.0
+ */
+export interface SampleError {
+  readonly _tag: "SampleError"
+  readonly generated: number
+  readonly discards: number
+  readonly seed: string | number
+}
+
+/**
+ * Opaque string token that replays a falsification and its complete shrink path.
+ *
+ * **When to use**
+ *
+ * Use with {@link CheckOptions.replay} to copy, store, and reproduce a `Falsified` result from the same
+ * implementation.
+ *
+ * **Details**
+ *
+ * The token records whether the property returned `false` or failed its Effect, but does not record a typed error value
+ * or input fingerprint.
+ *
+ * **Gotchas**
+ *
+ * Replay compatibility is not guaranteed across releases of this unstable module.
+ *
+ * @stability unstable
+ * @category models
+ * @since 4.0.0
+ */
+export type Replay = string
+
+/**
+ * Configures property checking, shrinking, and replay.
+ *
+ * **Details**
+ *
+ * `size` is the maximum local complexity scale. Checking starts with smaller values and grows to that size according
+ * to completed runs; discarded attempts do not advance the progression. A single-run check uses the configured size.
+ * Each unconstrained string, collection, or object property observes the current size independently. Recursive
+ * branches instead consume one shared recursion allowance. Explicit Schema bounds and required members still apply.
+ *
+ * `maxShrinks` bounds the number of shrink candidates inspected after the initial failure. Candidates rejected by a
+ * Schema check, `filter`, `filterMap`, or dependent generation consume the same budget even though the property is not
+ * evaluated. Candidates that produce a different failure class also consume the budget. When the budget is exhausted,
+ * checking returns the best shrunk input found so far. The `shrinks` field in a `Falsified` result counts only
+ * candidates that were accepted as smaller failures.
+ *
+ * **Gotchas**
+ *
+ * When `replay` is present, its recorded seed, attempt, size, and shrink path control the run. The `runs`, `size`,
+ * `maxDiscards`, `maxShrinks`, and `seed` options are ignored.
+ *
+ * @stability unstable
+ * @category models
+ * @since 4.0.0
+ */
+export interface CheckOptions {
+  readonly runs?: number | undefined
+  readonly size?: number | undefined
+  readonly maxDiscards?: number | undefined
+  readonly maxShrinks?: number | undefined
+  readonly seed?: string | number | undefined
+  readonly replay?: Replay | undefined
+}
+
+/**
+ * Independent defaults for property checking and sampling, excluding replay tokens.
+ *
+ * @stability unstable
+ * @category models
+ * @since 4.0.0
+ */
+export interface GlobalOptions {
+  readonly check?: Omit<CheckOptions, "replay"> | undefined
+  readonly sample?: SampleOptions | undefined
+}
+
+/**
+ * Replaces the defaults used by {@link checkEffect} and {@link sampleEffect}.
+ *
+ * **Details**
+ *
+ * Options are resolved once per execution: explicit non-`undefined` values, then configured defaults, then built-in
+ * defaults. The supplied configuration is copied. Pass `{}` to reset it. Replay tokens retain control of replayed checks.
+ *
+ * **Gotchas**
+ *
+ * Configure defaults before starting concurrent tests. Changes affect subsequent executions, including Effects created
+ * earlier, but do not affect active runs.
+ *
+ * @stability unstable
+ * @category configuration
+ * @since 4.0.0
+ */
+export const configureGlobal = Internal.configureGlobal
+
+/**
+ * Identifies a property that returned `false`.
+ *
+ * @stability unstable
+ * @category models
+ * @since 4.0.0
+ */
+export interface ReturnedFalse {
+  readonly _tag: "ReturnedFalse"
+}
+
+/**
+ * Preserves a typed failure produced by an effectful property.
+ *
+ * @stability unstable
+ * @category models
+ * @since 4.0.0
+ */
+export interface PropertyError<out E> {
+  readonly _tag: "PropertyError"
+  readonly error: E
+}
+
+/**
+ * Represents the reason a property was falsified.
+ *
+ * @stability unstable
+ * @category models
+ * @since 4.0.0
+ */
+export type PropertyFailure<E> = ReturnedFalse | PropertyError<E>
+
+/**
+ * Reports that every requested property run passed.
+ *
+ * @stability unstable
+ * @category models
+ * @since 4.0.0
+ */
+export interface Passed {
+  readonly _tag: "Passed"
+  readonly runs: number
+  readonly discards: number
+}
+
+/**
+ * Reports a generated failure and its shrunk input.
+ *
+ * **Details**
+ *
+ * `initialInput` is the generated value that first falsified the property. `shrunkInput` is the best failing value found
+ * by the bounded shrink search and may be equal to `initialInput`.
+ *
+ * `runs` counts main property evaluations through the falsifying evaluation. It excludes evaluations performed while
+ * shrinking. A replay reports one run.
+ *
+ * @stability unstable
+ * @category models
+ * @since 4.0.0
+ */
+export interface Falsified<out A, out E> {
+  readonly _tag: "Falsified"
+  readonly initialInput: A
+  readonly shrunkInput: A
+  readonly failure: PropertyFailure<E>
+  readonly runs: number
+  readonly discards: number
+  readonly shrinks: number
+  readonly replay: Replay
+}
+
+/**
+ * Reports that bounded generation discarded too many candidates.
+ *
+ * **Details**
+ *
+ * The effective `seed` can be passed to {@link checkEffect} to reproduce the exhausted run, including when checking
+ * originally selected a seed from the Effect `Random` service.
+ *
+ * @stability unstable
+ * @category models
+ * @since 4.0.0
+ */
+export interface Exhausted {
+  readonly _tag: "Exhausted"
+  readonly runs: number
+  readonly discards: number
+  readonly seed: string | number
+}
+
+/**
+ * Reports that replay coordinates no longer reproduce the recorded failure class.
+ *
+ * **Details**
+ *
+ * - `PropertyPassed` means that the regenerated root passed.
+ * - `ShrinkPassed` means that the root switched failure class, or that a recorded shrink either passed or switched
+ *   failure class.
+ *
+ * @stability unstable
+ * @category models
+ * @since 4.0.0
+ */
+export interface ReplayMismatch {
+  readonly _tag: "ReplayMismatch"
+  readonly reason: "AttemptDiscarded" | "PropertyPassed" | "ShrinkPathUnavailable" | "ShrinkPassed"
+}
+
+/**
+ * Represents every ordinary outcome of property checking.
+ *
+ * **Details**
+ *
+ * Defects and fiber interruption are not converted to this data type and continue through the returned `Effect`.
+ *
+ * @stability unstable
+ * @category models
+ * @since 4.0.0
+ */
+export type CheckResult<A, E> = Passed | Falsified<A, E> | Exhausted | ReplayMismatch
+
+/**
+ * Formats an unsuccessful property-check result as a diagnostic message, returning `undefined` for a passed result.
+ *
+ * **When to use**
+ *
+ * Use when integrating `checkEffect` with a test runner or another reporting interface.
+ *
+ * @stability unstable
+ * @category converting
+ * @since 4.0.0
+ */
+export function formatCheckFailure<A, E>(result: CheckResult<A, E>): string | undefined {
+  switch (result._tag) {
+    case "Passed":
+      return undefined
+    case "Falsified":
+      return `Property falsified after ${result.runs} run(s) and ${result.shrinks} shrink(s)\n` +
+        `Shrunk input: ${Formatter.format(result.shrunkInput, { space: 2 })}\n` +
+        `${
+          result.failure._tag === "ReturnedFalse"
+            ? "Failure: returned false"
+            : `Failure: ${
+              Cause.isCause(result.failure.error)
+                ? Cause.pretty(result.failure.error)
+                : Formatter.format(result.failure.error, { space: 2 })
+            }`
+        }\n` +
+        `Replay: ${result.replay}`
+    case "Exhausted":
+      return `Property exhausted after ${result.runs} run(s) and ${result.discards} discard(s)\n` +
+        `Seed: ${Formatter.format(result.seed, { space: 2 })}`
+    case "ReplayMismatch":
+      return `Property replay failed: ${result.reason}`
   }
-  if (Predicate.isNumber(options.minLength)) {
-    out.constraints.minLength = options.minLength
-  }
-  if (Predicate.isNumber(options.maxLength)) {
-    out.constraints.maxLength = options.maxLength
-  }
-  if (Predicate.isString(options.pattern)) {
-    out.pattern = options.pattern
-  }
-  return out
 }
 
-interface NumberConstraints {
-  readonly _tag: "NumberConstraints"
-  readonly constraints: FastCheck.FloatConstraints
-  readonly isInteger: boolean
+/**
+ * Derives an `Arbitrary` from the decoded `Type` of a Schema.
+ *
+ * **When to use**
+ *
+ * Use when you want Schema-aware generation without exposing a third-party property-testing engine.
+ *
+ * **Details**
+ *
+ * When `options.shrink` is provided, generated roots still come from Schema derivation, while the callback defines the
+ * complete shrink tree. Invalid candidates are skipped and count against `maxShrinks` without reaching the property.
+ *
+ * **Gotchas**
+ *
+ * Derivation is immediate and throws when the current unstable implementation cannot compile the Schema or prove a
+ * finite route through a recursive component.
+ *
+ * A custom shrinker replaces Schema-derived shrinking. It is evaluated lazily after a property failure and must be
+ * synchronous, deterministic, terminating, and free of mutation.
+ *
+ * @stability unstable
+ * @category constructors
+ * @since 4.0.0
+ */
+export function schema<S extends Schema_.Constraint>(
+  schema: S,
+  options?: SchemaOptions<S["Type"]>
+): Arbitrary<S["Type"]> {
+  return Internal.schema(schema, options)
 }
 
-/** @internal */
-export const makeNumberConstraints = (options: {
-  readonly isInteger?: boolean | undefined
-  readonly min?: unknown
-  readonly minExcluded?: boolean | undefined
-  readonly max?: unknown
-  readonly maxExcluded?: boolean | undefined
-  readonly noNaN?: boolean | undefined
-  readonly noDefaultInfinity?: boolean | undefined
-}): NumberConstraints => {
-  const out: Types.Mutable<NumberConstraints> = {
-    _tag: "NumberConstraints",
-    constraints: {},
-    isInteger: options.isInteger ?? false
-  }
-  if (Predicate.isNumber(options.min)) {
-    out.constraints.min = Math.fround(options.min)
-  }
-  if (Predicate.isBoolean(options.minExcluded)) {
-    out.constraints.minExcluded = options.minExcluded
-  }
-  if (Predicate.isNumber(options.max)) {
-    out.constraints.max = Math.fround(options.max)
-  }
-  if (Predicate.isBoolean(options.maxExcluded)) {
-    out.constraints.maxExcluded = options.maxExcluded
-  }
-  if (Predicate.isBoolean(options.noNaN)) {
-    out.constraints.noNaN = options.noNaN
-  }
-  if (Predicate.isBoolean(options.noDefaultInfinity)) {
-    out.constraints.noDefaultInfinity = options.noDefaultInfinity
-  }
-  return out
+/**
+ * Creates an `Arbitrary` that always generates `value` and has no shrink candidates.
+ *
+ * **When to use**
+ *
+ * Use when a branch of dependent generation should produce an already constructed value.
+ *
+ * **Gotchas**
+ *
+ * Every generation returns the same value. Objects are not cloned, so properties must not mutate them.
+ *
+ * @see {@link flatMap} for selecting dependent Arbitraries
+ * @stability unstable
+ * @category constructors
+ * @since 4.0.0
+ */
+export function Constant<const A>(value: A): Arbitrary<A> {
+  return Internal.constant(value)
 }
 
-interface BigIntConstraints {
-  readonly _tag: "BigIntConstraints"
-  readonly constraints: FastCheck.BigIntConstraints
-}
+/**
+ * Generates variable-length arrays from an existing element `Arbitrary`.
+ *
+ * **When to use**
+ *
+ * Use when generating command sequences or collections whose elements are built with Arbitrary composition.
+ *
+ * **Details**
+ *
+ * Shrinking tries removing blocks, including prefixes and interior blocks, while preserving the order and values of
+ * retained elements. It also tries the elements' own shrink candidates. Length bounds remain valid during shrinking,
+ * and elements share the generation budget for recursion.
+ *
+ * **Gotchas**
+ *
+ * Invalid length bounds throw a `RangeError` when this function is called. Retained objects are not cloned, so
+ * properties must not mutate generated values. Bounded shrinking does not guarantee a globally minimal failure.
+ *
+ * **Example** (Removing irrelevant commands)
+ *
+ * ```ts import.meta.vitest
+ * import { Arbitrary, Effect, Schema } from "effect"
+ *
+ * const command = Arbitrary.schema(Schema.Literals(["Add", "Reset", "Stop"]))
+ * const commands = Arbitrary.array(command, { maxLength: 50 })
+ * const result = await Effect.runPromise(
+ *   Arbitrary.checkEffect(commands, (values) => {
+ *     // The state machine fails when Reset occurs before a later Stop.
+ *     const reset = values.indexOf("Reset")
+ *     return reset === -1 || !values.slice(reset + 1).includes("Stop")
+ *   }, { runs: 1, size: 4, seed: 0 })
+ * )
+ *
+ * result._tag // => "Falsified"
+ * if (result._tag === "Falsified") {
+ *   result.initialInput // => ["Add", "Add", "Reset", "Stop"]
+ *   result.shrunkInput // => ["Reset", "Stop"]
+ * }
+ * ```
+ *
+ * @see {@link ArrayOptions} for length bounds
+ * @see {@link all} for fixed tuples and records of Arbitraries
+ * @see {@link schema} for deriving arrays described by Schema
+ * @stability unstable
+ * @category constructors
+ * @since 4.0.0
+ */
+export const array: <A>(item: Arbitrary<A>, options?: ArrayOptions) => Arbitrary<Array<A>> = Internal.array
 
-/** @internal */
-export const makeBigIntConstraints = (options: {
-  readonly min?: bigint | undefined
-  readonly max?: bigint | undefined
-}): BigIntConstraints => {
-  const out: Types.Mutable<BigIntConstraints> = {
-    _tag: "BigIntConstraints",
-    constraints: {}
-  }
-  if (Predicate.isBigInt(options.min)) {
-    out.constraints.min = options.min
-  }
-  if (Predicate.isBigInt(options.max)) {
-    out.constraints.max = options.max
-  }
-  return out
-}
+/**
+ * Transforms every generated value and its shrink candidates.
+ *
+ * **When to use**
+ *
+ * Use when you want to derive generated values from an existing `Arbitrary` without changing its generation or shrink
+ * structure.
+ *
+ * @stability unstable
+ * @category mapping
+ * @since 4.0.0
+ */
+export const map: {
+  <A, B>(f: (value: A) => B): (self: Arbitrary<A>) => Arbitrary<B>
+  <A, B>(self: Arbitrary<A>, f: (value: A) => B): Arbitrary<B>
+} = dual(2, <A, B>(self: Arbitrary<A>, f: (value: A) => B): Arbitrary<B> => Internal.map(self, f))
 
-interface ArrayConstraints {
-  readonly _tag: "ArrayConstraints"
-  readonly constraints: FastCheck.ArrayConstraints
-}
+/**
+ * Keeps generated values and shrink candidates that satisfy a predicate or refinement.
+ *
+ * **When to use**
+ *
+ * Use when a condition cannot be expressed constructively by the source Schema or after values have been transformed.
+ *
+ * **Gotchas**
+ *
+ * Rejected generated values count against `maxDiscards`. Prefer Schema checks when possible because the Schema compiler
+ * may generate matching values directly.
+ *
+ * @see {@link filterMap} for transforming and filtering simultaneously
+ * @stability unstable
+ * @category filtering
+ * @since 4.0.0
+ */
+export const filter: {
+  <A, B extends A>(refinement: Refinement<A, B>): (self: Arbitrary<A>) => Arbitrary<B>
+  <A>(predicate: Predicate<A>): <B extends A>(self: Arbitrary<B>) => Arbitrary<B>
+  <A, B extends A>(self: Arbitrary<A>, refinement: Refinement<A, B>): Arbitrary<B>
+  <A>(self: Arbitrary<A>, predicate: Predicate<A>): Arbitrary<A>
+} = dual(2, <A>(self: Arbitrary<A>, predicate: Predicate<A>): Arbitrary<A> => Internal.filter(self, predicate))
 
-/** @internal */
-export const makeArrayConstraints = (options: {
-  readonly minLength?: unknown
-  readonly maxLength?: unknown
-}): ArrayConstraints => {
-  const out: Types.Mutable<ArrayConstraints> = {
-    _tag: "ArrayConstraints",
-    constraints: {}
-  }
-  if (Predicate.isNumber(options.minLength)) {
-    out.constraints.minLength = options.minLength
-  }
-  if (Predicate.isNumber(options.maxLength)) {
-    out.constraints.maxLength = options.maxLength
-  }
-  return out
-}
-
-interface DateConstraints {
-  readonly _tag: "DateConstraints"
-  readonly constraints: FastCheck.DateConstraints
-}
-
-/** @internal */
-export const makeDateConstraints = (options: {
-  readonly min?: Date | undefined
-  readonly max?: Date | undefined
-  readonly noInvalidDate?: boolean | undefined
-}): DateConstraints => {
-  const out: Types.Mutable<DateConstraints> = {
-    _tag: "DateConstraints",
-    constraints: {}
-  }
-  if (Predicate.isDate(options.min)) {
-    out.constraints.min = options.min
-  }
-  if (Predicate.isDate(options.max)) {
-    out.constraints.max = options.max
-  }
-  if (Predicate.isBoolean(options.noInvalidDate)) {
-    out.constraints.noInvalidDate = options.noInvalidDate
-  }
-  return out
-}
-
-type Refinements = ReadonlyArray<SchemaAST.Refinement>
-
-interface Base {
-  readonly path: ReadonlyArray<PropertyKey>
-  readonly refinements: Refinements
-  readonly annotations: ReadonlyArray<ArbitraryAnnotation<any, any>>
-}
-
-interface StringKeyword extends Base {
-  readonly _tag: "StringKeyword"
-  readonly constraints: ReadonlyArray<StringConstraints>
-}
-
-interface NumberKeyword extends Base {
-  readonly _tag: "NumberKeyword"
-  readonly constraints: ReadonlyArray<NumberConstraints>
-}
-
-interface BigIntKeyword extends Base {
-  readonly _tag: "BigIntKeyword"
-  readonly constraints: ReadonlyArray<BigIntConstraints>
-}
-
-interface DateFromSelf extends Base {
-  readonly _tag: "DateFromSelf"
-  readonly constraints: ReadonlyArray<DateConstraints>
-}
-
-interface Declaration extends Base {
-  readonly _tag: "Declaration"
-  readonly typeParameters: ReadonlyArray<Description>
-  readonly ast: SchemaAST.AST
-}
-
-interface TupleType extends Base {
-  readonly _tag: "TupleType"
-  readonly constraints: ReadonlyArray<ArrayConstraints>
-  readonly elements: ReadonlyArray<{
-    readonly isOptional: boolean
-    readonly description: Description
-  }>
-  readonly rest: ReadonlyArray<Description>
-}
-
-interface TypeLiteral extends Base {
-  readonly _tag: "TypeLiteral"
-  readonly propertySignatures: ReadonlyArray<{
-    readonly isOptional: boolean
-    readonly name: PropertyKey
-    readonly value: Description
-  }>
-  readonly indexSignatures: ReadonlyArray<{
-    readonly parameter: Description
-    readonly value: Description
-  }>
-}
-
-interface Union extends Base {
-  readonly _tag: "Union"
-  readonly members: ReadonlyArray<Description>
-}
-
-interface Suspend extends Base {
-  readonly _tag: "Suspend"
-  readonly id: string
-  readonly ast: SchemaAST.AST
-  readonly description: () => Description
-}
-
-interface Ref extends Base {
-  readonly _tag: "Ref"
-  readonly id: string
-  readonly ast: SchemaAST.AST
-}
-
-interface NeverKeyword extends Base {
-  readonly _tag: "NeverKeyword"
-  readonly ast: SchemaAST.AST
-}
-
-interface Keyword extends Base {
-  readonly _tag: "Keyword"
-  readonly value:
-    | "UndefinedKeyword"
-    | "VoidKeyword"
-    | "UnknownKeyword"
-    | "AnyKeyword"
-    | "BooleanKeyword"
-    | "SymbolKeyword"
-    | "ObjectKeyword"
-}
-
-interface Literal extends Base {
-  readonly _tag: "Literal"
-  readonly literal: SchemaAST.LiteralValue
-}
-
-interface UniqueSymbol extends Base {
-  readonly _tag: "UniqueSymbol"
-  readonly symbol: symbol
-}
-
-interface Enums extends Base {
-  readonly _tag: "Enums"
-  readonly enums: ReadonlyArray<readonly [string, string | number]>
-  readonly ast: SchemaAST.AST
-}
-
-interface TemplateLiteral extends Base {
-  readonly _tag: "TemplateLiteral"
-  readonly head: string
-  readonly spans: ReadonlyArray<{
-    readonly description: Description
-    readonly literal: string
-  }>
-}
-
-type Description =
-  | Declaration
-  | NeverKeyword
-  | Keyword
-  | Literal
-  | UniqueSymbol
-  | Enums
-  | TemplateLiteral
-  | StringKeyword
-  | NumberKeyword
-  | BigIntKeyword
-  | DateFromSelf
-  | TupleType
-  | TypeLiteral
-  | Union
-  | Suspend
-  | Ref
-
-const getArbitraryAnnotation = SchemaAST.getAnnotation<ArbitraryAnnotation<any, any>>(SchemaAST.ArbitraryAnnotationId)
-
-const getASTConstraints = (ast: SchemaAST.AST) => {
-  const TypeAnnotationId = ast.annotations[SchemaAST.SchemaIdAnnotationId]
-  if (Predicate.isPropertyKey(TypeAnnotationId)) {
-    const out = ast.annotations[TypeAnnotationId]
-    if (Predicate.isReadonlyRecord(out)) {
-      return out
-    }
-  }
-}
-
-const idMemoMap = globalValue(
-  Symbol.for("effect/Arbitrary/IdMemoMap"),
-  () => new Map<SchemaAST.AST, string>()
+/**
+ * Transforms accepted generated values and discards rejected values.
+ *
+ * **When to use**
+ *
+ * Use when transformation and validation need to happen in one step after constructing an `Arbitrary`.
+ *
+ * **Gotchas**
+ *
+ * Failed filters discard generated roots and count against `maxDiscards`. Failures are not exposed in sampling or
+ * checking results.
+ *
+ * @see {@link map} for transformations that cannot reject
+ * @see {@link filter} for retaining original values that satisfy a condition
+ * @stability unstable
+ * @category filtering
+ * @since 4.0.0
+ */
+export const filterMap: {
+  <A, B, X>(f: Filter.Filter<A, B, X>): (self: Arbitrary<A>) => Arbitrary<B>
+  <A, B, X>(self: Arbitrary<A>, f: Filter.Filter<A, B, X>): Arbitrary<B>
+} = dual(
+  2,
+  <A, B, X>(self: Arbitrary<A>, f: Filter.Filter<A, B, X>): Arbitrary<B> => Internal.filterMap(self, f)
 )
 
-let counter = 0
+/**
+ * Sequentially selects an `Arbitrary` from a generated value.
+ *
+ * **When to use**
+ *
+ * Use when the domain or shape of a generated value depends on another generated value.
+ *
+ * **Details**
+ *
+ * Shrinking first tries smaller source values and regenerates their dependent Arbitraries. It then shrinks the
+ * selected dependent value. After a dependent shrink is selected, source shrinking is closed for that branch.
+ *
+ * **Gotchas**
+ *
+ * The callback must be synchronous, deterministic, and terminating. It can be evaluated again during shrinking and
+ * replay. Deriving a Schema inside the callback also repeats that derivation, so precompile finite dependent
+ * Arbitraries when possible.
+ *
+ * @see {@link map} for total transformations that do not select another Arbitrary
+ * @see {@link Constant} for dependent branches that return an existing value
+ * @stability unstable
+ * @category sequencing
+ * @since 4.0.0
+ */
+export const flatMap: {
+  <A, B>(f: (value: A) => Arbitrary<B>): (self: Arbitrary<A>) => Arbitrary<B>
+  <A, B>(self: Arbitrary<A>, f: (value: A) => Arbitrary<B>): Arbitrary<B>
+} = dual(2, <A, B>(self: Arbitrary<A>, f: (value: A) => Arbitrary<B>): Arbitrary<B> => Internal.flatMap(self, f))
 
-function wrapGetDescription(
-  f: (ast: SchemaAST.AST, description: Description) => Description,
-  g: (ast: SchemaAST.AST, path: ReadonlyArray<PropertyKey>) => Description
-): (ast: SchemaAST.AST, path: ReadonlyArray<PropertyKey>) => Description {
-  return (ast, path) => f(ast, g(ast, path))
-}
-
-function parseMeta(ast: SchemaAST.AST): [SchemaAST.SchemaIdAnnotation | undefined, Record<string | symbol, unknown>] {
-  const jsonSchema = SchemaAST.getJSONSchemaAnnotation(ast).pipe(
-    Option.filter(Predicate.isReadonlyRecord),
-    Option.getOrUndefined
-  )
-  const schemaId = Option.getOrElse(SchemaAST.getSchemaIdAnnotation(ast), () => undefined)
-  const schemaParams = Option.fromNullable(schemaId).pipe(
-    Option.map((id) => ast.annotations[id]),
-    Option.filter(Predicate.isReadonlyRecord),
-    Option.getOrUndefined
-  )
-  return [schemaId, { ...schemaParams, ...jsonSchema }]
-}
-
-/** @internal */
-export const getDescription = wrapGetDescription(
-  (ast, description) => {
-    const annotation = getArbitraryAnnotation(ast)
-    if (Option.isSome(annotation)) {
-      return {
-        ...description,
-        annotations: [...description.annotations, annotation.value]
-      }
+/**
+ * Combines Arbitraries into one `Arbitrary` whose generated value mirrors the input shape.
+ *
+ * **When to use**
+ *
+ * Use when you need to generate several independent values together.
+ *
+ * **Details**
+ *
+ * Accepts a tuple or array, an iterable, or a record of Arbitraries. Tuple positions and record keys are preserved in
+ * the generated value. Members are generated in a randomized internal order so recursive members share the generation
+ * budget fairly, while shrinking changes one member at a time.
+ *
+ * **Gotchas**
+ *
+ * Iterable inputs are consumed when `all` is called. If any member discards a generated root, the complete generated
+ * value is discarded.
+ *
+ * @see {@link array} for variable-length arrays that shrink by removing elements
+ * @stability unstable
+ * @category constructors
+ * @since 4.0.0
+ */
+export function all<const Input extends Iterable<Arbitrary<any>> | Record<string, Arbitrary<any>>>(
+  input: Input
+): Arbitrary<
+  [Input] extends [ReadonlyArray<Arbitrary<any>>] ? {
+      -readonly [K in keyof Input]: [Input[K]] extends [Arbitrary<infer A>] ? A : never
     }
-    return description
-  },
-  (ast, path) => {
-    const [schemaId, meta] = parseMeta(ast)
-    switch (ast._tag) {
-      case "Refinement": {
-        const from = getDescription(ast.from, path)
-        switch (from._tag) {
-          case "StringKeyword":
-            return {
-              ...from,
-              constraints: [...from.constraints, makeStringConstraints(meta)],
-              refinements: [...from.refinements, ast]
-            }
-          case "NumberKeyword": {
-            const c = schemaId === schemaId_.NonNaNSchemaId ?
-              makeNumberConstraints({ noNaN: true }) :
-              schemaId === schemaId_.FiniteSchemaId || schemaId === schemaId_.JsonNumberSchemaId ?
-              makeNumberConstraints({ noDefaultInfinity: true, noNaN: true }) :
-              makeNumberConstraints({
-                isInteger: "type" in meta && meta.type === "integer",
-                noNaN: undefined,
-                noDefaultInfinity: undefined,
-                min: meta.exclusiveMinimum ?? meta.minimum,
-                minExcluded: "exclusiveMinimum" in meta ? true : undefined,
-                max: meta.exclusiveMaximum ?? meta.maximum,
-                maxExcluded: "exclusiveMaximum" in meta ? true : undefined
-              })
-            return {
-              ...from,
-              constraints: [...from.constraints, c],
-              refinements: [...from.refinements, ast]
-            }
-          }
-          case "BigIntKeyword": {
-            const c = getASTConstraints(ast)
-            return {
-              ...from,
-              constraints: c !== undefined ? [...from.constraints, makeBigIntConstraints(c)] : from.constraints,
-              refinements: [...from.refinements, ast]
-            }
-          }
-          case "TupleType":
-            return {
-              ...from,
-              constraints: [
-                ...from.constraints,
-                makeArrayConstraints({
-                  minLength: meta.minItems,
-                  maxLength: meta.maxItems
-                })
-              ],
-              refinements: [...from.refinements, ast]
-            }
-          case "DateFromSelf":
-            return {
-              ...from,
-              constraints: [...from.constraints, makeDateConstraints(meta)],
-              refinements: [...from.refinements, ast]
-            }
-          default:
-            return {
-              ...from,
-              refinements: [...from.refinements, ast]
-            }
-        }
+    : [Input] extends [Iterable<Arbitrary<infer A>>] ? Array<A>
+    : [Input] extends [Record<string, Arbitrary<any>>] ? {
+        -readonly [K in keyof Input]: [Input[K]] extends [Arbitrary<infer A>] ? A : never
       }
-      case "Declaration": {
-        if (schemaId === schemaId_.DateFromSelfSchemaId) {
-          return {
-            _tag: "DateFromSelf",
-            constraints: [makeDateConstraints(meta)],
-            path,
-            refinements: [],
-            annotations: []
-          }
-        }
-        return {
-          _tag: "Declaration",
-          typeParameters: ast.typeParameters.map((ast) => getDescription(ast, path)),
-          path,
-          refinements: [],
-          annotations: [],
-          ast
-        }
-      }
-      case "Literal": {
-        return {
-          _tag: "Literal",
-          literal: ast.literal,
-          path,
-          refinements: [],
-          annotations: []
-        }
-      }
-      case "UniqueSymbol": {
-        return {
-          _tag: "UniqueSymbol",
-          symbol: ast.symbol,
-          path,
-          refinements: [],
-          annotations: []
-        }
-      }
-      case "Enums": {
-        return {
-          _tag: "Enums",
-          enums: ast.enums,
-          path,
-          refinements: [],
-          annotations: [],
-          ast
-        }
-      }
-      case "TemplateLiteral": {
-        return {
-          _tag: "TemplateLiteral",
-          head: ast.head,
-          spans: ast.spans.map((span) => ({
-            description: getDescription(span.type, path),
-            literal: span.literal
-          })),
-          path,
-          refinements: [],
-          annotations: []
-        }
-      }
-      case "StringKeyword":
-        return {
-          _tag: "StringKeyword",
-          constraints: [],
-          path,
-          refinements: [],
-          annotations: []
-        }
-      case "NumberKeyword":
-        return {
-          _tag: "NumberKeyword",
-          constraints: [],
-          path,
-          refinements: [],
-          annotations: []
-        }
-      case "BigIntKeyword":
-        return {
-          _tag: "BigIntKeyword",
-          constraints: [],
-          path,
-          refinements: [],
-          annotations: []
-        }
-      case "TupleType":
-        return {
-          _tag: "TupleType",
-          constraints: [],
-          elements: ast.elements.map((element, i) => ({
-            isOptional: element.isOptional,
-            description: getDescription(element.type, [...path, i])
-          })),
-          rest: ast.rest.map((element, i) => getDescription(element.type, [...path, i])),
-          path,
-          refinements: [],
-          annotations: []
-        }
-      case "TypeLiteral":
-        return {
-          _tag: "TypeLiteral",
-          propertySignatures: ast.propertySignatures.map((ps) => ({
-            isOptional: ps.isOptional,
-            name: ps.name,
-            value: getDescription(ps.type, [...path, ps.name])
-          })),
-          indexSignatures: ast.indexSignatures.map((is) => ({
-            parameter: getDescription(is.parameter, path),
-            value: getDescription(is.type, path)
-          })),
-          path,
-          refinements: [],
-          annotations: []
-        }
-      case "Union":
-        return {
-          _tag: "Union",
-          members: ast.types.map((member, i) => getDescription(member, [...path, i])),
-          path,
-          refinements: [],
-          annotations: []
-        }
-      case "Suspend": {
-        const memoId = idMemoMap.get(ast)
-        if (memoId !== undefined) {
-          return {
-            _tag: "Ref",
-            id: memoId,
-            ast,
-            path,
-            refinements: [],
-            annotations: []
-          }
-        }
-        counter++
-        const id = `__id-${counter}__`
-        idMemoMap.set(ast, id)
-        return {
-          _tag: "Suspend",
-          id,
-          ast,
-          description: () => getDescription(ast.f(), path),
-          path,
-          refinements: [],
-          annotations: []
-        }
-      }
-      case "Transformation":
-        return getDescription(ast.to, path)
-      case "NeverKeyword":
-        return {
-          _tag: "NeverKeyword",
-          path,
-          refinements: [],
-          annotations: [],
-          ast
-        }
-      default: {
-        return {
-          _tag: "Keyword",
-          value: ast._tag,
-          path,
-          refinements: [],
-          annotations: []
-        }
-      }
-    }
-  }
-)
-
-function getMax(n1: Date | undefined, n2: Date | undefined): Date | undefined
-function getMax(n1: bigint | undefined, n2: bigint | undefined): bigint | undefined
-function getMax(n1: number | undefined, n2: number | undefined): number | undefined
-function getMax(
-  n1: bigint | number | Date | undefined,
-  n2: bigint | number | Date | undefined
-): bigint | number | Date | undefined {
-  return n1 === undefined ? n2 : n2 === undefined ? n1 : n1 <= n2 ? n2 : n1
+    : never
+> {
+  return Internal.all(input)
 }
 
-function getMin(n1: Date | undefined, n2: Date | undefined): Date | undefined
-function getMin(n1: bigint | undefined, n2: bigint | undefined): bigint | undefined
-function getMin(n1: number | undefined, n2: number | undefined): number | undefined
-function getMin(
-  n1: bigint | number | Date | undefined,
-  n2: bigint | number | Date | undefined
-): bigint | number | Date | undefined {
-  return n1 === undefined ? n2 : n2 === undefined ? n1 : n1 <= n2 ? n1 : n2
+/**
+ * Generates a bounded collection of values from an `Arbitrary`.
+ *
+ * **When to use**
+ *
+ * Use when you need generated examples without running a property.
+ *
+ * @stability unstable
+ * @category running
+ * @since 4.0.0
+ */
+export function sampleEffect<A>(
+  self: Arbitrary<A>,
+  options?: SampleOptions
+): Effect.Effect<ReadonlyArray<A>, SampleError> {
+  return Internal.sampleEffect(self, options)
 }
 
-const getOr = (a: boolean | undefined, b: boolean | undefined): boolean | undefined => {
-  return a === undefined ? b : b === undefined ? a : a || b
-}
-
-function mergePattern(pattern1: string | undefined, pattern2: string | undefined): string | undefined {
-  if (pattern1 === undefined) {
-    return pattern2
-  }
-  if (pattern2 === undefined) {
-    return pattern1
-  }
-  return `(?:${pattern1})|(?:${pattern2})`
-}
-
-function mergeStringConstraints(c1: StringConstraints, c2: StringConstraints): StringConstraints {
-  return makeStringConstraints({
-    minLength: getMax(c1.constraints.minLength, c2.constraints.minLength),
-    maxLength: getMin(c1.constraints.maxLength, c2.constraints.maxLength),
-    pattern: mergePattern(c1.pattern, c2.pattern)
-  })
-}
-
-function buildStringConstraints(description: StringKeyword): StringConstraints | undefined {
-  return description.constraints.length === 0
-    ? undefined
-    : description.constraints.reduce(mergeStringConstraints)
-}
-
-function mergeNumberConstraints(c1: NumberConstraints, c2: NumberConstraints): NumberConstraints {
-  return makeNumberConstraints({
-    isInteger: c1.isInteger || c2.isInteger,
-    min: getMax(c1.constraints.min, c2.constraints.min),
-    minExcluded: getOr(c1.constraints.minExcluded, c2.constraints.minExcluded),
-    max: getMin(c1.constraints.max, c2.constraints.max),
-    maxExcluded: getOr(c1.constraints.maxExcluded, c2.constraints.maxExcluded),
-    noNaN: getOr(c1.constraints.noNaN, c2.constraints.noNaN),
-    noDefaultInfinity: getOr(c1.constraints.noDefaultInfinity, c2.constraints.noDefaultInfinity)
-  })
-}
-
-function buildNumberConstraints(description: NumberKeyword): NumberConstraints | undefined {
-  return description.constraints.length === 0
-    ? undefined
-    : description.constraints.reduce(mergeNumberConstraints)
-}
-
-function mergeBigIntConstraints(c1: BigIntConstraints, c2: BigIntConstraints): BigIntConstraints {
-  return makeBigIntConstraints({
-    min: getMax(c1.constraints.min, c2.constraints.min),
-    max: getMin(c1.constraints.max, c2.constraints.max)
-  })
-}
-
-function buildBigIntConstraints(description: BigIntKeyword): BigIntConstraints | undefined {
-  return description.constraints.length === 0
-    ? undefined
-    : description.constraints.reduce(mergeBigIntConstraints)
-}
-
-function mergeDateConstraints(c1: DateConstraints, c2: DateConstraints): DateConstraints {
-  return makeDateConstraints({
-    min: getMax(c1.constraints.min, c2.constraints.min),
-    max: getMin(c1.constraints.max, c2.constraints.max),
-    noInvalidDate: getOr(c1.constraints.noInvalidDate, c2.constraints.noInvalidDate)
-  })
-}
-
-function buildDateConstraints(description: DateFromSelf): DateConstraints | undefined {
-  return description.constraints.length === 0
-    ? undefined
-    : description.constraints.reduce(mergeDateConstraints)
-}
-
-const constArrayConstraints = makeArrayConstraints({})
-
-function mergeArrayConstraints(c1: ArrayConstraints, c2: ArrayConstraints): ArrayConstraints {
-  return makeArrayConstraints({
-    minLength: getMax(c1.constraints.minLength, c2.constraints.minLength),
-    maxLength: getMin(c1.constraints.maxLength, c2.constraints.maxLength)
-  })
-}
-
-function buildArrayConstraints(description: TupleType): ArrayConstraints | undefined {
-  return description.constraints.length === 0
-    ? undefined
-    : description.constraints.reduce(mergeArrayConstraints)
-}
-
-const arbitraryMemoMap = globalValue(
-  Symbol.for("effect/Arbitrary/arbitraryMemoMap"),
-  () => new WeakMap<SchemaAST.AST, LazyArbitrary<any>>()
-)
-
-function applyFilters(filters: ReadonlyArray<Predicate.Predicate<any>>, arb: LazyArbitrary<any>): LazyArbitrary<any> {
-  return (fc) => filters.reduce((arb, filter) => arb.filter(filter), arb(fc))
-}
-
-function absurd(message: string): LazyArbitrary<any> {
-  return () => {
-    throw new Error(message)
-  }
-}
-
-function getContextConstraints(description: Description): ArbitraryGenerationContext["constraints"] {
-  switch (description._tag) {
-    case "StringKeyword":
-      return buildStringConstraints(description)
-    case "NumberKeyword":
-      return buildNumberConstraints(description)
-    case "BigIntKeyword":
-      return buildBigIntConstraints(description)
-    case "DateFromSelf":
-      return buildDateConstraints(description)
-    case "TupleType":
-      return buildArrayConstraints(description)
-  }
-}
-
-function wrapGo(
-  f: (description: Description, ctx: ArbitraryGenerationContext, lazyArb: LazyArbitrary<any>) => LazyArbitrary<any>,
-  g: (description: Description, ctx: ArbitraryGenerationContext) => LazyArbitrary<any>
-): (description: Description, ctx: ArbitraryGenerationContext) => LazyArbitrary<any> {
-  return (description, ctx) => f(description, ctx, g(description, ctx))
-}
-
-const go = wrapGo(
-  (description, ctx, lazyArb) => {
-    const annotation: ArbitraryAnnotation<any, any> | undefined =
-      description.annotations[description.annotations.length - 1]
-
-    // error handling
-    if (annotation === undefined) {
-      switch (description._tag) {
-        case "Declaration":
-        case "NeverKeyword":
-          throw new Error(errors_.getArbitraryMissingAnnotationErrorMessage(description.path, description.ast))
-        case "Enums":
-          if (description.enums.length === 0) {
-            throw new Error(errors_.getArbitraryEmptyEnumErrorMessage(description.path))
-          }
-      }
-    }
-
-    const filters = description.refinements.map((ast) => (a: any) =>
-      Option.isNone(ast.filter(a, SchemaAST.defaultParseOption, ast))
-    )
-    if (annotation === undefined) {
-      return applyFilters(filters, lazyArb)
-    }
-
-    const constraints = getContextConstraints(description)
-    if (constraints !== undefined) {
-      ctx = { ...ctx, constraints }
-    }
-
-    if (description._tag === "Declaration") {
-      return applyFilters(filters, annotation(...description.typeParameters.map((p) => go(p, ctx)), ctx))
-    }
-    if (description.refinements.length > 0) {
-      // TODO(4.0): remove the `lazyArb` parameter
-      return applyFilters(filters, annotation(lazyArb, ctx))
-    }
-    return annotation(ctx)
-  },
-  (description, ctx) => {
-    switch (description._tag) {
-      case "DateFromSelf": {
-        const constraints = buildDateConstraints(description)
-        return (fc) => fc.date(constraints?.constraints)
-      }
-      case "Declaration":
-      case "NeverKeyword":
-        return absurd(`BUG: cannot generate an arbitrary for ${description._tag}`)
-      case "Literal":
-        return (fc) => fc.constant(description.literal)
-      case "UniqueSymbol":
-        return (fc) => fc.constant(description.symbol)
-      case "Keyword": {
-        switch (description.value) {
-          case "UndefinedKeyword":
-            return (fc) => fc.constant(undefined)
-          case "VoidKeyword":
-          case "UnknownKeyword":
-          case "AnyKeyword":
-            return (fc) => fc.anything()
-          case "BooleanKeyword":
-            return (fc) => fc.boolean()
-          case "SymbolKeyword":
-            return (fc) => fc.string().map((s) => Symbol.for(s))
-          case "ObjectKeyword":
-            return (fc) => fc.oneof(fc.object(), fc.array(fc.anything()))
-        }
-      }
-      case "Enums":
-        return (fc) => fc.oneof(...description.enums.map(([_, value]) => fc.constant(value)))
-      case "TemplateLiteral": {
-        return (fc) => {
-          const string = fc.string({ maxLength: 5 })
-          const number = fc.float({ noDefaultInfinity: true, noNaN: true })
-
-          const getTemplateLiteralArb = (description: TemplateLiteral) => {
-            const components: Array<FastCheck.Arbitrary<string | number>> = description.head !== ""
-              ? [fc.constant(description.head)]
-              : []
-
-            const getTemplateLiteralSpanTypeArb = (
-              description: Description
-            ): FastCheck.Arbitrary<string | number> => {
-              switch (description._tag) {
-                case "StringKeyword":
-                  return string
-                case "NumberKeyword":
-                  return number
-                case "Literal":
-                  return fc.constant(String(description.literal))
-                case "Union":
-                  return fc.oneof(...description.members.map(getTemplateLiteralSpanTypeArb))
-                case "TemplateLiteral":
-                  return getTemplateLiteralArb(description)
-                default:
-                  return fc.constant("")
-              }
-            }
-
-            description.spans.forEach((span) => {
-              components.push(getTemplateLiteralSpanTypeArb(span.description))
-              if (span.literal !== "") {
-                components.push(fc.constant(span.literal))
-              }
-            })
-
-            return fc.tuple(...components).map((spans) => spans.join(""))
-          }
-
-          return getTemplateLiteralArb(description)
-        }
-      }
-      case "StringKeyword": {
-        const constraints = buildStringConstraints(description)
-        const pattern = constraints?.pattern
-        return pattern !== undefined ?
-          (fc) => fc.stringMatching(new RegExp(pattern)) :
-          (fc) => fc.string(constraints?.constraints)
-      }
-      case "NumberKeyword": {
-        const constraints = buildNumberConstraints(description)
-        return constraints?.isInteger ?
-          (fc) => fc.integer(constraints.constraints) :
-          (fc) => fc.float(constraints?.constraints)
-      }
-      case "BigIntKeyword": {
-        const constraints = buildBigIntConstraints(description)
-        return (fc) => fc.bigInt(constraints?.constraints ?? {})
-      }
-      case "TupleType": {
-        const elements: Array<LazyArbitrary<any>> = []
-        let hasOptionals = false
-        for (const element of description.elements) {
-          elements.push(go(element.description, ctx))
-          if (element.isOptional) {
-            hasOptionals = true
-          }
-        }
-        const rest = description.rest.map((d) => go(d, ctx))
-        return (fc) => {
-          // ---------------------------------------------
-          // handle elements
-          // ---------------------------------------------
-          let output = fc.tuple(...elements.map((arb) => arb(fc)))
-          if (hasOptionals) {
-            const indexes = fc.tuple(
-              ...description.elements.map((element) => element.isOptional ? fc.boolean() : fc.constant(true))
-            )
-            output = output.chain((tuple) =>
-              indexes.map((booleans) => {
-                for (const [i, b] of booleans.reverse().entries()) {
-                  if (!b) {
-                    tuple.splice(booleans.length - i, 1)
-                  }
-                }
-                return tuple
-              })
-            )
-          }
-
-          // ---------------------------------------------
-          // handle rest element
-          // ---------------------------------------------
-          if (Arr.isNonEmptyReadonlyArray(rest)) {
-            const constraints = buildArrayConstraints(description) ?? constArrayConstraints
-            const [head, ...tail] = rest
-            const item = head(fc)
-            output = output.chain((as) => {
-              const len = as.length
-              // We must adjust the constraints for the rest element
-              // because the elements might have generated some values
-              const restArrayConstraints = subtractElementsLength(constraints.constraints, len)
-              if (restArrayConstraints.maxLength === 0) {
-                return fc.constant(as)
-              }
-              /*
-
-              `getSuspendedArray` is used to generate less values in
-              the context of a recursive schema. Without it, the following schema
-              would generate an big amount of values possibly leading to a stack
-              overflow:
-
-              ```ts
-              type A = ReadonlyArray<A | null>
-
-              const schema = S.Array(
-                S.NullOr(S.suspend((): S.Schema<A> => schema))
-              )
-              ```
-
-            */
-              const arr = ctx.depthIdentifier !== undefined
-                ? getSuspendedArray(fc, ctx.depthIdentifier, ctx.maxDepth, item, restArrayConstraints)
-                : fc.array(item, restArrayConstraints)
-              if (len === 0) {
-                return arr
-              }
-              return arr.map((rest) => [...as, ...rest])
-            })
-            // ---------------------------------------------
-            // handle post rest elements
-            // ---------------------------------------------
-            for (let j = 0; j < tail.length; j++) {
-              output = output.chain((as) => tail[j](fc).map((a) => [...as, a]))
-            }
-          }
-
-          return output
-        }
-      }
-      case "TypeLiteral": {
-        const propertySignatures: Array<LazyArbitrary<any>> = []
-        const requiredKeys: Array<PropertyKey> = []
-        for (const ps of description.propertySignatures) {
-          if (!ps.isOptional) {
-            requiredKeys.push(ps.name)
-          }
-          propertySignatures.push(go(ps.value, ctx))
-        }
-        const indexSignatures = description.indexSignatures.map((is) =>
-          [go(is.parameter, ctx), go(is.value, ctx)] as const
-        )
-        return (fc) => {
-          const pps: any = {}
-          for (let i = 0; i < propertySignatures.length; i++) {
-            const ps = description.propertySignatures[i]
-            pps[ps.name] = propertySignatures[i](fc)
-          }
-          let output = fc.record<any, any>(pps, { requiredKeys })
-          // ---------------------------------------------
-          // handle index signatures
-          // ---------------------------------------------
-          for (let i = 0; i < indexSignatures.length; i++) {
-            const key = indexSignatures[i][0](fc)
-            const value = indexSignatures[i][1](fc)
-            output = output.chain((o) => {
-              const item = fc.tuple(key, value)
-              /*
-
-              `getSuspendedArray` is used to generate less key/value pairs in
-              the context of a recursive schema. Without it, the following schema
-              would generate an big amount of values possibly leading to a stack
-              overflow:
-
-              ```ts
-              type A = { [_: string]: A }
-
-              const schema = S.Record({ key: S.String, value: S.suspend((): S.Schema<A> => schema) })
-              ```
-
-            */
-              const arr = ctx.depthIdentifier !== undefined ?
-                getSuspendedArray(fc, ctx.depthIdentifier, ctx.maxDepth, item, { maxLength: 2 }) :
-                fc.array(item)
-              return arr.map((tuples) => ({ ...Object.fromEntries(tuples), ...o }))
-            })
-          }
-
-          return output
-        }
-      }
-      case "Union": {
-        const members = description.members.map((member) => go(member, ctx))
-        return (fc) => fc.oneof(...members.map((arb) => arb(fc)))
-      }
-      case "Suspend": {
-        const memo = arbitraryMemoMap.get(description.ast)
-        if (memo) {
-          return memo
-        }
-        if (ctx.depthIdentifier === undefined) {
-          ctx = { ...ctx, depthIdentifier: description.id }
-        }
-        const get = util_.memoizeThunk(() => {
-          return go(description.description(), ctx)
-        })
-        const out: LazyArbitrary<any> = (fc) => fc.constant(null).chain(() => get()(fc))
-        arbitraryMemoMap.set(description.ast, out)
-        return out
-      }
-      case "Ref": {
-        const memo = arbitraryMemoMap.get(description.ast)
-        if (memo) {
-          return memo
-        }
-        throw new Error(`BUG: Ref ${JSON.stringify(description.id)} not found`)
-      }
-    }
-  }
-)
-
-function subtractElementsLength(
-  constraints: FastCheck.ArrayConstraints,
-  len: number
-): FastCheck.ArrayConstraints {
-  if (len === 0 || (constraints.minLength === undefined && constraints.maxLength === undefined)) {
-    return constraints
-  }
-  const out = { ...constraints }
-  if (out.minLength !== undefined) {
-    out.minLength = Math.max(out.minLength - len, 0)
-  }
-  if (out.maxLength !== undefined) {
-    out.maxLength = Math.max(out.maxLength - len, 0)
-  }
-  return out
-}
-
-const getSuspendedArray = (
-  fc: typeof FastCheck,
-  depthIdentifier: string,
-  maxDepth: number,
-  item: FastCheck.Arbitrary<any>,
-  constraints: FastCheck.ArrayConstraints
-) => {
-  // In the context of a recursive schema, we don't want a `maxLength` greater than 2.
-  // The only exception is when `minLength` is also set, in which case we set
-  // `maxLength` to the minimum value, which is `minLength`.
-  const maxLengthLimit = Math.max(2, constraints.minLength ?? 0)
-  if (constraints.maxLength !== undefined && constraints.maxLength > maxLengthLimit) {
-    constraints = { ...constraints, maxLength: maxLengthLimit }
-  }
-  return fc.oneof(
-    { maxDepth, depthIdentifier },
-    fc.constant([]),
-    fc.array(item, constraints)
-  )
+/**
+ * Checks a pure or effectful property and shrinks the first falsification.
+ *
+ * **When to use**
+ *
+ * Use when you want deterministic, interruptible property checking with typed property failures and replay.
+ *
+ * **Details**
+ *
+ * Returning `false` and failing an Effect are shrinkable falsifications. Shrinking preserves which of these two
+ * failure classes caused the initial falsification. Typed error values may change while shrinking and are not compared
+ * for equality. Defects and interruption continue through the returned Effect instead of becoming `CheckResult`
+ * values.
+ *
+ * **Gotchas**
+ *
+ * Properties must treat generated values as immutable. The runner does not clone values before evaluation, so
+ * mutation can change reported shrunk inputs or interfere with shrinking and replay.
+ *
+ * A property must also produce the same outcome for the same input and initial environment. The runner may evaluate
+ * it repeatedly and does not restore mutable services between evaluations. Stateful properties should acquire and
+ * release an independent fixture inside each evaluation.
+ *
+ * @stability unstable
+ * @category running
+ * @since 4.0.0
+ */
+export function checkEffect<A, E = never, R = never>(
+  self: Arbitrary<A>,
+  property: (value: A) => boolean | Effect.Effect<boolean, E, R>,
+  options?: CheckOptions
+): Effect.Effect<CheckResult<A, E>, never, R> {
+  return Internal.checkEffect(self, property, options)
 }

@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - effect-v4
 
 concurrency: ${{ github.workflow }}-${{ github.ref }}
 

@@ -118,7 +118,7 @@ function optionalProviderShapes(suffix: string) {
       name: "function*",
       provider: function* ({ context }: { context: { value?: string } }) {
         yield* Effect.void;
-        return Option.map(Option.fromNullable(context.value), (value) => ({
+        return Option.map(Option.fromNullishOr(context.value), (value) => ({
           value: `${value}:${suffix}:generator`,
         }));
       },
@@ -131,7 +131,7 @@ function optionalProviderShapes(suffix: string) {
         context: { value?: string };
       }) {
         yield* Effect.void;
-        return Option.map(Option.fromNullable(context.value), (value) => ({
+        return Option.map(Option.fromNullishOr(context.value), (value) => ({
           value: `${value}:${suffix}:named`,
         }));
       }),
@@ -144,7 +144,7 @@ function optionalProviderShapes(suffix: string) {
         context: { value?: string };
       }) {
         yield* Effect.void;
-        return Option.map(Option.fromNullable(context.value), (value) => ({
+        return Option.map(Option.fromNullishOr(context.value), (value) => ({
           value: `${value}:${suffix}:anonymous`,
         }));
       }),
@@ -154,7 +154,7 @@ function optionalProviderShapes(suffix: string) {
       provider: ({ context }: { context: { value?: string } }) =>
         Effect.gen(function* () {
           yield* Effect.void;
-          return Option.map(Option.fromNullable(context.value), (value) => ({
+          return Option.map(Option.fromNullishOr(context.value), (value) => ({
             value: `${value}:${suffix}:effect-gen`,
           }));
         }),
@@ -247,10 +247,10 @@ describe("Effect callback shapes", () => {
 
   for (const { name, provider } of providerShapes("provide")) {
     it(`.provide supports ${name}`, async () => {
-      class RequestValue extends Context.Tag(`RequestValue:${name}`)<
+      class RequestValue extends Context.Service<
         RequestValue,
         { readonly value: string }
-      >() {}
+      >()(`RequestValue:${name}`) {}
 
       const procedure = eos
         .$context<{ value: string }>()
@@ -268,10 +268,10 @@ describe("Effect callback shapes", () => {
 
   for (const { name, provider } of optionalProviderShapes("optional")) {
     it(`.provideOptional supports ${name}`, async () => {
-      class RequestValue extends Context.Tag(`OptionalRequestValue:${name}`)<
+      class RequestValue extends Context.Service<
         RequestValue,
         { readonly value: string }
-      >() {}
+      >()(`OptionalRequestValue:${name}`) {}
 
       const procedure = eos
         .$context<{ value?: string }>()
@@ -323,8 +323,7 @@ describe("Effect callback shapes", () => {
     }> = [];
     const spanNamesById = new Map<string, string>();
     const tracer = Tracer.make({
-      context: (f) => f(),
-      span(name, parent, context, links, startTime, kind) {
+      span({ name, parent, annotations, links, startTime, kind, sampled }) {
         const spanId = `span-${spans.length + 1}`;
         spans.push({
           name,
@@ -342,11 +341,11 @@ describe("Effect callback shapes", () => {
           spanId,
           traceId: "trace",
           parent,
-          context,
+          annotations,
           status: { _tag: "Started" as const, startTime },
           attributes,
           links,
-          sampled: true,
+          sampled,
           kind,
           end() {},
           attribute(key: string, value: unknown) {
@@ -357,7 +356,9 @@ describe("Effect callback shapes", () => {
         };
       },
     });
-    const tracedRuntime = ManagedRuntime.make(Layer.setTracer(tracer));
+    const tracedRuntime = ManagedRuntime.make(
+      Layer.succeed(Tracer.Tracer, tracer),
+    );
     const effectFnProcedure = makeEffectORPC(tracedRuntime)
       .use(
         Effect.fn("custom.middleware.span")(function* ({

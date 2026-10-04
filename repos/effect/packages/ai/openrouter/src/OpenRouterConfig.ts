@@ -1,44 +1,60 @@
 /**
- * @since 1.0.0
+ * Scoped HTTP client customization for OpenRouter requests.
+ *
+ * @since 4.0.0
  */
-import type { HttpClient } from "@effect/platform/HttpClient"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import { dual } from "effect/Function"
+import type { HttpClient } from "effect/http/HttpClient"
 
 /**
- * @since 1.0.0
- * @category Context
+ * Scoped configuration read when executing OpenRouter requests.
+ *
+ * @see {@link withClientTransform} for scoping an HTTP client transformation
+ *
+ * @category services
+ * @since 4.0.0
  */
-export class OpenRouterConfig extends Context.Tag("@effect/ai-openrouter/OpenRouterConfig")<
+export class OpenRouterConfig extends Context.Service<
   OpenRouterConfig,
   OpenRouterConfig.Service
->() {
+>()("@effect/ai-openrouter/OpenRouterConfig") {
   /**
-   * @since 1.0.0
+   * Gets the configured OpenRouter service from the current context when present.
+   *
+   * @since 4.0.0
    */
   static readonly getOrUndefined: Effect.Effect<typeof OpenRouterConfig.Service | undefined> = Effect.map(
     Effect.context<never>(),
-    (context) => context.unsafeMap.get(OpenRouterConfig.key)
+    Context.getOrUndefined(OpenRouterConfig)
   )
 }
 
 /**
- * @since 1.0.0
+ * Types associated with the `OpenRouterConfig` context service.
+ *
+ * @since 4.0.0
  */
 export declare namespace OpenRouterConfig {
   /**
-   * @since 1.0.0
-   * @category Models
+   * HTTP client configuration for generated methods and alpha Decisions requests.
+   *
+   * @category services
+   * @since 4.0.0
    */
   export interface Service {
-    readonly transformClient?: (client: HttpClient) => HttpClient
+    readonly transformClient?: ((client: HttpClient) => HttpClient) | undefined
   }
 }
 
 /**
- * @since 1.0.0
- * @category Configuration
+ * Transforms the HTTP client for generated methods and alpha Decisions requests
+ * made by the supplied effect. Streaming chat completions ignore this transform.
+ * Replaces any existing scoped transform; compose them manually to apply both.
+ *
+ * @category configuration
+ * @since 4.0.0
  */
 export const withClientTransform: {
   (transform: (client: HttpClient) => HttpClient): <A, E, R>(self: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>

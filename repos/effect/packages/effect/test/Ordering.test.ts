@@ -1,39 +1,41 @@
-import { describe, it } from "@effect/vitest"
-import { strictEqual } from "@effect/vitest/utils"
 import { Ordering } from "effect"
+import { deepStrictEqual } from "node:assert"
+import { describe, it } from "vitest"
 
 describe("Ordering", () => {
-  it("match", () => {
-    const f = Ordering.match({
-      onLessThan: () => "lt",
-      onEqual: () => "eq",
-      onGreaterThan: () => "gt"
+  it("Reducer", () => {
+    const R = Ordering.Reducer
+
+    deepStrictEqual(R.combine(-1, 1), -1)
+    deepStrictEqual(R.combine(1, -1), 1)
+    deepStrictEqual(R.combine(1, 1), 1)
+    deepStrictEqual(R.combine(0, 0), 0)
+    deepStrictEqual(R.combine(0, 1), 1)
+    deepStrictEqual(R.combine(1, 0), 1)
+    deepStrictEqual(R.combine(0, -1), -1)
+    deepStrictEqual(R.combine(-1, 0), -1)
+  })
+
+  it("reverse flips less-than and greater-than and leaves equal unchanged", () => {
+    deepStrictEqual(Ordering.reverse(-1), 1)
+    deepStrictEqual(Ordering.reverse(1), -1)
+    deepStrictEqual(Ordering.reverse(0), 0)
+  })
+
+  it("match selects the branch for the ordering in both data-first and data-last forms", () => {
+    const toMessage = Ordering.match({
+      onLessThan: () => "less than",
+      onEqual: () => "equal",
+      onGreaterThan: () => "greater than"
     })
-    strictEqual(f(-1), "lt")
-    strictEqual(f(0), "eq")
-    strictEqual(f(1), "gt")
-  })
 
-  it("reverse", () => {
-    strictEqual(Ordering.reverse(-1), 1)
-    strictEqual(Ordering.reverse(0), 0)
-    strictEqual(Ordering.reverse(1), -1)
-  })
+    deepStrictEqual(toMessage(-1), "less than")
+    deepStrictEqual(toMessage(0), "equal")
+    deepStrictEqual(toMessage(1), "greater than")
 
-  it("combine", () => {
-    strictEqual(Ordering.combine(0, 0), 0)
-    strictEqual(Ordering.combine(0, 1), 1)
-    strictEqual(Ordering.combine(1, -1), 1)
-    strictEqual(Ordering.combine(-1, 1), -1)
-  })
-
-  it("combineMany", () => {
-    strictEqual(Ordering.combineMany(0, []), 0)
-    strictEqual(Ordering.combineMany(1, []), 1)
-    strictEqual(Ordering.combineMany(-1, []), -1)
-    strictEqual(Ordering.combineMany(0, [0, 0, 0]), 0)
-    strictEqual(Ordering.combineMany(0, [0, 0, 1]), 1)
-    strictEqual(Ordering.combineMany(1, [0, 0, -1]), 1)
-    strictEqual(Ordering.combineMany(-1, [0, 0, 1]), -1)
+    deepStrictEqual(
+      Ordering.match(1, { onLessThan: () => "l", onEqual: () => "e", onGreaterThan: () => "g" }),
+      "g"
+    )
   })
 })

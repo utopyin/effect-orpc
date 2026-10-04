@@ -1,7 +1,7 @@
 import { NodeSdk } from "@effect/opentelemetry";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
 import { BatchSpanProcessor } from "@opentelemetry/sdk-trace-base";
-import { Layer, Logger, LogLevel, ManagedRuntime } from "effect";
+import { Layer, Logger, ManagedRuntime } from "effect";
 
 import { OrderService } from "./services/order";
 
@@ -14,13 +14,8 @@ const NodeSdkLive = NodeSdk.layer(() => ({
   ),
 }));
 
-const LoggerLive =
-  process.env.VITEST === "true"
-    ? Logger.minimumLogLevel(LogLevel.None)
-    : Logger.pretty;
+const LoggerLive = Logger.layer([Logger.consolePretty()]);
 
-const AppLive = Layer.mergeAll(LoggerLive, OrderService.Default).pipe(
-  Layer.provideMerge(NodeSdkLive),
-);
+const AppLive = Layer.mergeAll(LoggerLive, NodeSdkLive, OrderService.layer);
 
 export const runtime = ManagedRuntime.make(AppLive);

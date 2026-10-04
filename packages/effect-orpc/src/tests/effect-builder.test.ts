@@ -1,15 +1,7 @@
 import type { InferSchemaOutput } from "@orpc/contract";
 import { isContractProcedure } from "@orpc/contract";
 import { call, createRouterClient, os } from "@orpc/server";
-import {
-  Context,
-  Effect,
-  FiberRef,
-  Layer,
-  ManagedRuntime,
-  Option,
-  Tracer,
-} from "effect";
+import { Context, Effect, Layer, ManagedRuntime, Option, Tracer } from "effect";
 import { beforeEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 import z from "zod";
 
@@ -61,8 +53,7 @@ function makeRecordedRuntime() {
   const spans: Array<RecordedSpan> = [];
   const spanNamesById = new Map<string, string>();
   const tracer = Tracer.make({
-    context: (f) => f(),
-    span(name, parent, context, links, startTime, kind) {
+    span({ name, parent, annotations, links, startTime, kind, sampled }) {
       const spanId = `span-${spans.length + 1}`;
       spans.push({
         name,
@@ -80,11 +71,11 @@ function makeRecordedRuntime() {
         spanId,
         traceId: "trace",
         parent,
-        context,
+        annotations,
         status: { _tag: "Started" as const, startTime },
         attributes,
         links,
-        sampled: true,
+        sampled,
         kind,
         end() {},
         attribute(key: string, value: unknown) {
@@ -97,7 +88,7 @@ function makeRecordedRuntime() {
   });
 
   return {
-    runtime: ManagedRuntime.make(Layer.setTracer(tracer)),
+    runtime: ManagedRuntime.make(Layer.succeed(Tracer.Tracer, tracer)),
     spans,
   };
 }
@@ -261,16 +252,17 @@ describe("effectBuilder", () => {
     expect(effectFn).toHaveBeenCalledTimes(1);
   });
 
-  it(".effect does not inherit parent FiberRefs by default", async () => {
-    const requestIdRef = FiberRef.unsafeMake("missing");
+  it(".effect does not inherit parent services by default", async () => {
+    const RequestId = Context.Reference<string>("RequestIdMissing", {
+      defaultValue: () => "missing",
+    });
     const applied = builder.effect(function* () {
-      return yield* FiberRef.get(requestIdRef);
+      return yield* RequestId;
     });
 
     const result = await Effect.runPromise(
-      Effect.gen(function* () {
-        yield* FiberRef.set(requestIdRef, "req-123");
-        return yield* Effect.promise(() =>
+      Effect.provideService(
+        Effect.promise(() =>
           applied["~effect"].handler({
             context: {},
             input: undefined,
@@ -280,23 +272,26 @@ describe("effectBuilder", () => {
             lastEventId: undefined,
             errors: {},
           }),
-        );
-      }),
+        ),
+        RequestId,
+        "req-123",
+      ),
     );
 
     expect(result).toBe("missing");
   });
 
-  it(".effect inherits parent FiberRefs with withFiberContext", async () => {
-    const requestIdRef = FiberRef.unsafeMake("missing");
+  it(".effect inherits parent services with withFiberContext", async () => {
+    const RequestId = Context.Reference<string>("RequestIdInherited", {
+      defaultValue: () => "missing",
+    });
     const applied = builder.effect(function* () {
-      return yield* FiberRef.get(requestIdRef);
+      return yield* RequestId;
     });
 
     const result = await Effect.runPromise(
-      Effect.gen(function* () {
-        yield* FiberRef.set(requestIdRef, "req-123");
-        return yield* withFiberContext(() =>
+      Effect.provideService(
+        withFiberContext(() =>
           applied["~effect"].handler({
             context: {},
             input: undefined,
@@ -306,20 +301,24 @@ describe("effectBuilder", () => {
             lastEventId: undefined,
             errors: {},
           }),
-        );
-      }),
+        ),
+        RequestId,
+        "req-123",
+      ),
     );
 
     expect(result).toBe("req-123");
   });
 
-  it(".effect merges context FiberRefs with runtime FiberRefs, prioritizing context FiberRefs", async () => {
-    const requestIdRef = FiberRef.unsafeMake("missing");
+  it(".effect merges parent services with runtime services", async () => {
+    const RequestId = Context.Reference<string>("RequestIdMerged", {
+      defaultValue: () => "missing",
+    });
 
-    class Counter extends Effect.Tag("Counter")<
+    class Counter extends Context.Service<
       Counter,
       { increment: (n: number) => Effect.Effect<number> }
-    >() {}
+    >()("Counter") {}
 
     const CounterLive = Layer.succeed(Counter, {
       increment: (n: number) => Effect.succeed(n + 1),
@@ -329,17 +328,17 @@ describe("effectBuilder", () => {
     const procedure = effectBuilder.input(z.number()).effect(function* ({
       input,
     }) {
-      const requestId = yield* FiberRef.get(requestIdRef);
-      const value = yield* Counter.increment(input as number);
+      const requestId = yield* RequestId;
+      const counter = yield* Counter;
+      const value = yield* counter.increment(input as number);
 
       return { requestId, value };
     });
 
     try {
       const result = await Effect.runPromise(
-        Effect.gen(function* () {
-          yield* FiberRef.set(requestIdRef, "req-123");
-          return yield* withFiberContext(() =>
+        Effect.provideService(
+          withFiberContext(() =>
             procedure["~effect"].handler({
               context: {},
               input: 5,
@@ -349,8 +348,10 @@ describe("effectBuilder", () => {
               lastEventId: undefined,
               errors: {},
             }),
-          );
-        }),
+          ),
+          RequestId,
+          "req-123",
+        ),
       );
 
       expect(result).toEqual({ requestId: "req-123", value: 6 });
@@ -389,10 +390,10 @@ describe("makeEffectORPC factory", () => {
   });
 
   it("exports an eos builder that works with provide", async () => {
-    class Counter extends Effect.Tag("EosCounter")<
+    class Counter extends Context.Service<
       Counter,
       { increment: (n: number) => Effect.Effect<number> }
-    >() {}
+    >()("EosCounter") {}
 
     const procedure = eos
       .provide(
@@ -518,10 +519,10 @@ describe("makeEffectORPC factory", () => {
 describe("effect with services", () => {
   it("can use services from runtime layer", async () => {
     // Define a simple service
-    class Counter extends Effect.Tag("Counter")<
+    class Counter extends Context.Service<
       Counter,
       { increment: (n: number) => Effect.Effect<number> }
-    >() {}
+    >()("Counter") {}
 
     // Create a layer with the service
     const CounterLive = Layer.succeed(Counter, {
@@ -556,10 +557,10 @@ describe("effect with services", () => {
   });
 
   it("can create a builder directly from a Layer", async () => {
-    class Counter extends Effect.Tag("LayerCounter")<
+    class Counter extends Context.Service<
       Counter,
       { increment: (n: number) => Effect.Effect<number> }
-    >() {}
+    >()("LayerCounter") {}
 
     const CounterLive = Layer.succeed(Counter, {
       increment: (n: number) => Effect.succeed(n + 1),
@@ -577,10 +578,10 @@ describe("effect with services", () => {
   });
 
   it("can start without a runtime and provide a Layer", async () => {
-    class Counter extends Effect.Tag("ProvidedLayerCounter")<
+    class Counter extends Context.Service<
       Counter,
       { increment: (n: number) => Effect.Effect<number> }
-    >() {}
+    >()("ProvidedLayerCounter") {}
 
     const CounterLive = Layer.succeed(Counter, {
       increment: (n: number) => Effect.succeed(n + 1),
@@ -598,10 +599,10 @@ describe("effect with services", () => {
   });
 
   it("can wrap a custom builder without a runtime and provide a Layer", async () => {
-    class Counter extends Effect.Tag("ProvidedLayerCustomBuilderCounter")<
+    class Counter extends Context.Service<
       Counter,
       { increment: (n: number) => Effect.Effect<number> }
-    >() {}
+    >()("ProvidedLayerCustomBuilderCounter") {}
 
     const CounterLive = Layer.succeed(Counter, {
       increment: (n: number) => Effect.succeed(n + 1),
@@ -629,10 +630,9 @@ describe("effect with services", () => {
   });
 
   it(".provide makes a request-scoped service available to handlers", async () => {
-    class CurrentUser extends Context.Tag("CurrentUser")<
-      CurrentUser,
-      { id: string }
-    >() {}
+    class CurrentUser extends Context.Service<CurrentUser, { id: string }>()(
+      "CurrentUser",
+    ) {}
 
     const procedure = eos
       .$context<{ user: { id: string } }>()
@@ -647,14 +647,12 @@ describe("effect with services", () => {
   });
 
   it(".provide supports generator request-scoped providers", async () => {
-    class UserPrefix extends Context.Tag("ProviderUserPrefix")<
-      UserPrefix,
-      { prefix: string }
-    >() {}
-    class CurrentUser extends Context.Tag("GeneratorProviderCurrentUser")<
-      CurrentUser,
-      { id: string }
-    >() {}
+    class UserPrefix extends Context.Service<UserPrefix, { prefix: string }>()(
+      "ProviderUserPrefix",
+    ) {}
+    class CurrentUser extends Context.Service<CurrentUser, { id: string }>()(
+      "GeneratorProviderCurrentUser",
+    ) {}
 
     const procedure = eos
       .$context<{ user: { id: string } }>()
@@ -674,10 +672,9 @@ describe("effect with services", () => {
   });
 
   it(".provide service overrides the same service from the runtime", async () => {
-    class CurrentUser extends Context.Tag("CurrentUserOverride")<
-      CurrentUser,
-      { id: string }
-    >() {}
+    class CurrentUser extends Context.Service<CurrentUser, { id: string }>()(
+      "CurrentUserOverride",
+    ) {}
 
     const serviceRuntime = ManagedRuntime.make(
       Layer.succeed(CurrentUser, { id: "runtime" }),
@@ -746,10 +743,9 @@ describe("effect with services", () => {
   });
 
   it("Effect .use can read services from upstream .provide", async () => {
-    class CurrentUser extends Context.Tag("MiddlewareCurrentUser")<
-      CurrentUser,
-      { id: string }
-    >() {}
+    class CurrentUser extends Context.Service<CurrentUser, { id: string }>()(
+      "MiddlewareCurrentUser",
+    ) {}
 
     let seenUser: { id: string } | undefined;
     const procedure = eos
@@ -786,10 +782,10 @@ describe("effect with services", () => {
   });
 
   it("Effect .middleware can use builder-provided services", async () => {
-    class MiddlewareService extends Context.Tag("MiddlewareService")<
+    class MiddlewareService extends Context.Service<
       MiddlewareService,
       { value: string }
-    >() {}
+    >()("MiddlewareService") {}
 
     const builder = eos.provide(MiddlewareService, () =>
       Effect.succeed({ value: "provided" }),
@@ -852,10 +848,9 @@ describe("effect with services", () => {
   });
 
   it("Effect .use can enrich context through next", async () => {
-    class CurrentUser extends Context.Tag("NextCurrentUser")<
-      CurrentUser,
-      { id: string }
-    >() {}
+    class CurrentUser extends Context.Service<CurrentUser, { id: string }>()(
+      "NextCurrentUser",
+    ) {}
 
     const procedure = eos
       .$context<{ user: { id: string } }>()
@@ -947,10 +942,9 @@ describe("effect with services", () => {
   });
 
   it("runs contiguous Effect providers, middleware, and handler in one runtime boundary", async () => {
-    class CurrentUser extends Context.Tag("SingleBoundaryCurrentUser")<
-      CurrentUser,
-      { id: string }
-    >() {}
+    class CurrentUser extends Context.Service<CurrentUser, { id: string }>()(
+      "SingleBoundaryCurrentUser",
+    ) {}
 
     const runPromiseExit = vi.spyOn(runtime, "runPromiseExit");
     const procedure = makeEffectORPC(runtime)
@@ -972,10 +966,9 @@ describe("effect with services", () => {
   });
 
   it("runs procedure-level Effect providers and middleware with the handler in one runtime boundary", async () => {
-    class CurrentUser extends Context.Tag("ProcedureBoundaryCurrentUser")<
-      CurrentUser,
-      { id: string }
-    >() {}
+    class CurrentUser extends Context.Service<CurrentUser, { id: string }>()(
+      "ProcedureBoundaryCurrentUser",
+    ) {}
 
     const runPromiseExit = vi.spyOn(runtime, "runPromiseExit");
     const procedure = makeEffectORPC(runtime)
@@ -1000,15 +993,18 @@ describe("effect with services", () => {
   });
 
   it(".provideOptional makes present request-scoped services available", async () => {
-    class CurrentUser extends Context.Tag("OptionalCurrentUserPresent")<
-      CurrentUser,
-      { id: string }
-    >() {}
+    class CurrentUser extends Context.Service<CurrentUser, { id: string }>()(
+      "OptionalCurrentUserPresent",
+    ) {}
 
     const procedure = eos
       .$context<{ user?: { id: string } }>()
       .provideOptional(CurrentUser, ({ context }) =>
-        Effect.succeed(Option.fromNullable(context.user)),
+        Effect.succeed(
+          context.user === undefined
+            ? Option.none()
+            : Option.some(context.user),
+        ),
       )
       .effect(function* () {
         return yield* Effect.serviceOption(CurrentUser);
@@ -1020,16 +1016,15 @@ describe("effect with services", () => {
   });
 
   it(".provideOptional supports generator request-scoped providers", async () => {
-    class CurrentUser extends Context.Tag("GeneratorOptionalCurrentUser")<
-      CurrentUser,
-      { id: string }
-    >() {}
+    class CurrentUser extends Context.Service<CurrentUser, { id: string }>()(
+      "GeneratorOptionalCurrentUser",
+    ) {}
 
     const procedure = eos
       .$context<{ user?: { id: string } }>()
       .provideOptional(CurrentUser, function* ({ context }) {
         yield* Effect.void;
-        return Option.fromNullable(context.user);
+        return Option.fromNullishOr(context.user);
       })
       .effect(function* () {
         return yield* Effect.serviceOption(CurrentUser);
@@ -1041,15 +1036,18 @@ describe("effect with services", () => {
   });
 
   it(".provideOptional leaves absent request-scoped services unavailable", async () => {
-    class CurrentUser extends Context.Tag("OptionalCurrentUserAbsent")<
-      CurrentUser,
-      { id: string }
-    >() {}
+    class CurrentUser extends Context.Service<CurrentUser, { id: string }>()(
+      "OptionalCurrentUserAbsent",
+    ) {}
 
     const procedure = eos
       .$context<{ user?: { id: string } }>()
       .provideOptional(CurrentUser, ({ context }) =>
-        Effect.succeed(Option.fromNullable(context.user)),
+        Effect.succeed(
+          context.user === undefined
+            ? Option.none()
+            : Option.some(context.user),
+        ),
       )
       .effect(function* () {
         return yield* Effect.serviceOption(CurrentUser);
@@ -1061,10 +1059,10 @@ describe("effect with services", () => {
   });
 
   it(".provideOptional does not satisfy required service access", () => {
-    class OptionalService extends Context.Tag("OptionalServiceRequirement")<
+    class OptionalService extends Context.Service<
       OptionalService,
       { readonly value: string }
-    >() {}
+    >()("OptionalServiceRequirement") {}
 
     eos
       .provideOptional(OptionalService, () =>
@@ -1215,10 +1213,10 @@ describe("default tracing (without .traced())", () => {
   });
 
   it("default tracing works with services from runtime", async () => {
-    class Greeter extends Effect.Tag("Greeter")<
+    class Greeter extends Context.Service<
       Greeter,
       { greet: (name: string) => Effect.Effect<string> }
-    >() {}
+    >()("Greeter") {}
 
     const GreeterLive = Layer.succeed(Greeter, {
       greet: (name: string) => Effect.succeed(`Hello, ${name}!`),
@@ -1230,7 +1228,8 @@ describe("default tracing (without .traced())", () => {
     const procedure = effectBuilder
       .input(z.object({ name: z.string() }))
       .effect(function* ({ input }) {
-        return yield* Greeter.greet(input.name);
+        const greeter = yield* Greeter;
+        return yield* greeter.greet(input.name);
       });
     const client = createRouterClient({ greeting: { say: procedure } });
 
@@ -1278,10 +1277,10 @@ describe("default tracing (without .traced())", () => {
   });
 
   it("requires handler services to come from the runtime or .provide", () => {
-    class MissingService extends Context.Tag("MissingService")<
+    class MissingService extends Context.Service<
       MissingService,
       { readonly value: string }
-    >() {}
+    >()("MissingService") {}
 
     eos.effect(
       // @ts-expect-error MissingService is not available from the runtime or .provide
@@ -1298,9 +1297,10 @@ describe("default tracing (without .traced())", () => {
   });
 
   it("requires Effect middleware services to come from the runtime or .provide", () => {
-    class MissingMiddlewareService extends Context.Tag(
-      "MissingMiddlewareService",
-    )<MissingMiddlewareService, { readonly value: string }>() {}
+    class MissingMiddlewareService extends Context.Service<
+      MissingMiddlewareService,
+      { readonly value: string }
+    >()("MissingMiddlewareService") {}
 
     eos
       .use(

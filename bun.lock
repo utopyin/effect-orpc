@@ -55,7 +55,7 @@
         "@orpc/server": ">=1.13.0",
         "@orpc/shared": ">=1.13.0",
         "effect": ">=4.0.0",
-        "typescript": "^5",
+        "typescript": ">=5.9",
       },
     },
   },

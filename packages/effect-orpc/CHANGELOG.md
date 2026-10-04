@@ -1,5 +1,46 @@
 # effect-orpc
 
+## 1.0.0
+
+### Major Changes
+
+- d7c00fc: migrate to effect-v4 (effect-smol)
+
+### Minor Changes
+
+- 3e203e9: Add Layer-based service provisioning: `makeEffectORPC(...)` and `implementEffect(...)` now accept a `Layer` in addition to `ManagedRuntime`. Builders can also start without a runtime and add base services later with `.provide(layer)`.
+
+  Add request-scoped Effect providers with `.provide(tag, provider)` and `.provideOptional(...)`, allowing procedures and downstream Effect middleware/handlers to access services derived from the current request context.
+
+  Add Effect-native generator middleware support to `.use(function* ...)`, including access to Effect services, Effect errors, `next(...)`, and `output(...)` from inside middleware.
+
+  Add reusable Effect-native middleware support to `builder.middleware(function* ...)`, so generator middleware can be defined once, use provided Effect services, and be passed to `.use(...)`.
+
+  Add contiguous Effect pipeline execution: adjacent Effect-native `.provide*`, generator `.use(...)`, and `.effect(...)` steps now run inside a single runtime boundary instead of crossing the runtime for each step, while preserving ordering around native oRPC middleware.
+
+  Extend the existing Node FiberRef bridge to preserve FiberRefs across split Effect groups, including side-effect-only `effect-orpc/node` bridge installation.
+
+- 070f9aa: Add `eos`, the default Effect-aware builder for the `eos.provide(AppLive)` workflow. `ManagedRuntime` is now used only when you pass one explicitly, so applications can use Layer-provided builders by default and opt into a user-owned runtime when they need to control Layer acquisition and release from their application lifecycle.
+- 3ccdef0: Support Effect-returning callbacks everywhere Effect-native callbacks are accepted.
+
+  Handlers, request-scoped providers, optional providers, `.use(...)`, and reusable `.middleware(...)` now accept `Effect.fn(...)` and functions returning `Effect.gen(...)` in addition to existing generator callbacks. Native oRPC middleware behavior is preserved, including `return next(...)` and guard-only middleware.
+
+  Named user spans from `Effect.fn("name")` and `Effect.withSpan(...)` are preserved inside the automatic procedure span.
+
+### Patch Changes
+
+- 19b48ed: Support latest effect-v4 version (4.0.0-beta.57)
+- f4a4deb: Support Effect 4.0.0-beta.98.
+- 2c5477e: Support latest effect-v4 beta version to date (4.0.0-beta.65)
+- 0c199ee: Support Effect 4.0.0-beta.83.
+- Port the proxy-based Effect builder and procedure compatibility layer to the Effect v4 prerelease line, preserving upstream oRPC parity while keeping Effect v4 runtime, error, and request-context behavior.
+- bef0bfd: docs: remove duplicate request-scoped context section
+- c94d899: Support Effect 4.0.0.
+
+  The `typescript` peer range is now `>=5.9`, matching Effect's requirement.
+
+  Effect 4.0.0 keeps a handler's failure when a finalizer also dies, so such a procedure now returns the handler's error instead of an `INTERNAL_SERVER_ERROR` for the finalizer defect.
+
 ## 1.0.0-effect-v4.8
 
 ### Patch Changes

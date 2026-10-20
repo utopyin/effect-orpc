@@ -20,17 +20,17 @@
   ],
   "type": "module",
   "exports": {
-    ".": "./src/index.ts",
-    "./node": "./src/node.ts"
-  },
-  "publishConfig": {
-    "exports": {
-      ".": {
-        "types": "./src/index.ts",
+    ".": {
+      "source": "./src/index.ts",
+      "default": {
+        "types": "./dist/index.d.ts",
         "default": "./dist/index.js"
-      },
-      "./node": {
-        "types": "./src/node.ts",
+      }
+    },
+    "./node": {
+      "source": "./src/node.ts",
+      "default": {
+        "types": "./dist/node.d.ts",
         "default": "./dist/node.js"
       }
     }
